@@ -250,15 +250,36 @@ class DeviceModel:
             self.set("AngZ", round(AngZ, 3))
             self.callback_method(self)
         else:
-            if self.statReg is not None:
-                for i in range(int(length / 2)):
-                    value = self.getSignInt16(self.TempBytes[2 * i + 3] << 8 | self.TempBytes[2 * i + 4])
-                    value = value / 32768
-                    self.set(str(self.statReg), round(value, 3))
-                    self.statReg += 1
+            self.processRegisterData(length)
         self.TempBytes.clear()
 
     # endregion
+
+    def processRegisterData(self, length):
+        if self.statReg is None:
+            return
+
+        values = []
+        for i in range(int(length / 2)):
+            values.append(self.getSignInt16(self.TempBytes[2 * i + 3] << 8 | self.TempBytes[2 * i + 4]))
+
+        if self.statReg == 0x43 and len(values) >= 1:
+            self.set("Temp", round(values[0] / 100, 2))
+            self.callback_method(self)
+            return
+
+        if self.statReg == 0x51 and len(values) >= 4:
+            self.set("q0", round(values[0] / 32768, 6))
+            self.set("q1", round(values[1] / 32768, 6))
+            self.set("q2", round(values[2] / 32768, 6))
+            self.set("q3", round(values[3] / 32768, 6))
+            self.callback_method(self)
+            return
+
+        for value in values:
+            value = value / 32768
+            self.set(str(self.statReg), round(value, 3))
+            self.statReg += 1
 
     @staticmethod
     def getSignInt16(num):
@@ -391,6 +412,10 @@ class DeviceModel:
         print("Loop reading started")
         while self.loop:
             self.readReg(0x34, 15)
+            time.sleep(0.05)
+            self.readReg(0x43, 1)
+            time.sleep(0.05)
+            self.readReg(0x51, 4)
             time.sleep(0.2)
         print("Loop reading stopped")
 

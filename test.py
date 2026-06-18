@@ -9,7 +9,27 @@ def updateData(DeviceModel):
         "Acc: X={AccX}, Y={AccY}, Z={AccZ} | "
         "Gyro: X={AsX}, Y={AsY}, Z={AsZ} | "
         "Mag: X={HX}, Y={HY}, Z={HZ} | "
-        "Angle: X={AngX}, Y={AngY}, Z={AngZ}".format(**data)
+        "Angle: X={AngX}, Y={AngY}, Z={AngZ} | "
+        "Temp: {Temp} C | "
+        "Quat: q0={q0}, q1={q1}, q2={q2}, q3={q3}".format(
+            AccX=data.get("AccX", "-"),
+            AccY=data.get("AccY", "-"),
+            AccZ=data.get("AccZ", "-"),
+            AsX=data.get("AsX", "-"),
+            AsY=data.get("AsY", "-"),
+            AsZ=data.get("AsZ", "-"),
+            HX=data.get("HX", "-"),
+            HY=data.get("HY", "-"),
+            HZ=data.get("HZ", "-"),
+            AngX=data.get("AngX", "-"),
+            AngY=data.get("AngY", "-"),
+            AngZ=data.get("AngZ", "-"),
+            Temp=data.get("Temp", "-"),
+            q0=data.get("q0", "-"),
+            q1=data.get("q1", "-"),
+            q2=data.get("q2", "-"),
+            q3=data.get("q3", "-"),
+        )
     )
 
 
