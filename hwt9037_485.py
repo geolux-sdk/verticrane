@@ -61,6 +61,8 @@ class HWT9037_485:
         self.callback_method = callback_method
         # Guards Modbus transactions against concurrent access.
         self._lock = threading.Lock()
+        # Print per-transaction Modbus traffic (set False for high-rate logging).
+        self.verbose = True
 
     # region Device data access
 
@@ -183,8 +185,9 @@ class HWT9037_485:
                 print("MODBUS READ error: start=0x{0:04X}, count={1} -> {2}".format(
                     regAddr, regCount, rr))
                 return None
-            print("MODBUS READ: slave=0x{0:02X}, func=0x03, start=0x{1:04X}, count={2}".format(
-                self.ADDR, regAddr, regCount))
+            if self.verbose:
+                print("MODBUS READ: slave=0x{0:02X}, func=0x03, start=0x{1:04X}, count={2}".format(
+                    self.ADDR, regAddr, regCount))
             self.parseRegisters(regAddr, rr.registers)
             return rr.registers
         except ModbusException as ex:
@@ -217,8 +220,9 @@ class HWT9037_485:
                 print("MODBUS WRITE error: register=0x{0:04X}, value=0x{1:04X} -> {2}".format(
                     regAddr, sValue & 0xFFFF, rr))
                 return False
-            print("MODBUS WRITE: slave=0x{0:02X}, func=0x06, register=0x{1:04X}, value=0x{2:04X}".format(
-                self.ADDR, regAddr, sValue & 0xFFFF))
+            if self.verbose:
+                print("MODBUS WRITE: slave=0x{0:02X}, func=0x06, register=0x{1:04X}, value=0x{2:04X}".format(
+                    self.ADDR, regAddr, sValue & 0xFFFF))
             return True
         except ModbusException as ex:
             print(ex)
