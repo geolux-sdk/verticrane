@@ -1,1 +1,12 @@
-pyserial>=3.5
+# HWT9037-485 tilt sensor tooling dependencies.
+# Install with:  python -m pip install -r requirements.txt
+
+# Sensor communication (Modbus RTU over RS-485)
+pymodbus>=3.12,<4
+pyserial>=3.5            # serial transport used by pymodbus
+
+# Analysis dashboard (dashboard.py)
+streamlit>=1.58
+plotly>=6.8
+pandas>=2.3
+numpy>=1.26,<2
