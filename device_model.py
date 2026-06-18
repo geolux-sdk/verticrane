@@ -27,6 +27,9 @@ class DeviceModel:
     # Device data dictionary
     deviceData = {}
 
+    # Raw register data dictionary
+    registerData = {}
+
     # Whether the device is open
     isOpen = False
 
@@ -104,6 +107,7 @@ class DeviceModel:
         # Modbus device address
         self.ADDR = ADDR
         self.deviceData = {}
+        self.registerData = {}
         self.callback_method = callback_method
 
     # Calculate Modbus CRC.
@@ -164,7 +168,7 @@ class DeviceModel:
                     tLen = self.serialPort.inWaiting()
                     if tLen > 0:
                         data = self.serialPort.read(tLen)
-                        print("RX: {}".format(data.hex(" ").upper()))
+                        # print("RX: {}".format(data.hex(" ").upper()))
                         self.onDataReceived(data)
                 except Exception as ex:
                     print(ex)
@@ -261,7 +265,9 @@ class DeviceModel:
 
         values = []
         for i in range(int(length / 2)):
-            values.append(self.getSignInt16(self.TempBytes[2 * i + 3] << 8 | self.TempBytes[2 * i + 4]))
+            raw_value = self.TempBytes[2 * i + 3] << 8 | self.TempBytes[2 * i + 4]
+            self.registerData[self.statReg + i] = raw_value
+            values.append(self.getSignInt16(raw_value))
 
         if self.statReg == 0x43 and len(values) >= 1:
             self.set("Temp", round(values[0] / 100, 2))
@@ -325,8 +331,8 @@ class DeviceModel:
     # Send serial port data.
     def sendData(self, data):
         try:
-            self.logModbusTx(data)
-            print("TX: {}".format(self.formatBytes(data)))
+            # self.logModbusTx(data)
+            # print("TX: {}".format(self.formatBytes(data)))
             self.serialPort.write(data)
         except Exception as ex:
             print(ex)
@@ -416,7 +422,7 @@ class DeviceModel:
             self.readReg(0x43, 1)
             time.sleep(0.05)
             self.readReg(0x51, 4)
-            time.sleep(0.2)
+            time.sleep(3)
         print("Loop reading stopped")
 
     # Stop loop reading.

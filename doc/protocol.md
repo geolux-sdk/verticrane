@@ -39,14 +39,16 @@ Baud values:
 Current code setting:
 
 ```python
-device_model.DeviceModel("Test Device", "COM11", 115200, 0x50, updateData)
+device_model.DeviceModel("Test Device", "COM11", 9600, 0x50, updateData)
 ```
 
 Meaning:
 
 - Port: `COM11`
-- Baud rate: `115200`
+- Baud rate: `9600`
 - Modbus slave address: `0x50`
+
+The tested device responded at `9600 bps`. It did not respond at `115200 bps`.
 
 ## Device Address
 
@@ -60,6 +62,101 @@ Device address register:
 - Default: `0x0050`
 
 Current code uses `0x50`, which matches the document default.
+
+## Tested Initial Register Values
+
+The following values were read from the connected device during bring-up. All rows include the Modbus register address.
+
+### Communication And Identity
+
+| Address | Name | Raw value | Decoded value | Note |
+|---:|---|---:|---|---|
+| `0x0004` | `BAUD` | `0x0002` | `9600 bps` | Confirmed working baud rate |
+| `0x001A` | `IICADDR` | `0x0050` | Modbus address `0x50` | Current slave address |
+| `0x002E` | `VERSION` | `0x0343` | 835 | Firmware/version code |
+| `0x0074` | `MODDELAY` | `0x0BB8` | 3000 us | RS485 response delay |
+| `0x007F`~`0x0084` | `NUMBERID1`~`NUMBERID6` | `0x5457 0x3234 0x3030 0x3630 0x3138 0x3135` | `TW2400601815` | Device number, ASCII interpretation |
+
+### Operating Mode
+
+| Address | Name | Raw value | Decoded value | Note |
+|---:|---|---:|---|---|
+| `0x000E` | `WORKMODE` | `0x0000` | Normal data mode | Z-axis operation mode |
+| `0x001F` | `BANDWIDTH` | `0x0005` | 10 Hz | Bandwidth setting |
+| `0x0020` | `GYRORANGE` | `0x0003` | 2000 deg/s | Gyroscope range |
+| `0x0021` | `ACCRANGE` | `0x0003` | 16 g | Acceleration range |
+| `0x0022` | `SLEEP` | `0x0000` | Sleep off | Normal operation |
+| `0x0023` | `ORIENT` | `0x0000` | Horizontal installation | Installation direction |
+| `0x0024` | `AXIS6` | `0x0000` | 9-axis algorithm | Magnetic field is used for heading |
+
+### LED Register Test
+
+| Address | Name | Raw value | Decoded value | Tested result |
+|---:|---|---:|---|---|
+| `0x001B` | `LEDOFF` | `0x0000` | Document says LED ON | No visible LED change |
+| `0x001B` | `LEDOFF` | `0x0001` | Document says LED OFF | No visible LED change |
+
+Conclusion: this hardware appears to have no visible LED, or the common `LEDOFF` register is not connected to a visible LED on this model.
+
+### Calibration, Offset, And Filter Values
+
+| Address | Name | Raw value | Signed value | Note |
+|---:|---|---:|---:|---|
+| `0x0005` | `AXOFFSET` | `0x0000` | 0 | Acceleration X offset |
+| `0x0006` | `AYOFFSET` | `0x0000` | 0 | Acceleration Y offset |
+| `0x0007` | `AZOFFSET` | `0x0000` | 0 | Acceleration Z offset |
+| `0x0008` | `GXOFFSET` | `0x0000` | 0 | Gyro X offset |
+| `0x0009` | `GYOFFSET` | `0x0010` | 16 | Gyro Y offset |
+| `0x000A` | `GZOFFSET` | `0x0003` | 3 | Gyro Z offset |
+| `0x000B` | `HXOFFSET` | `0xFF41` | -191 | Magnetic X offset |
+| `0x000C` | `HYOFFSET` | `0x01B6` | 438 | Magnetic Y offset |
+| `0x000D` | `HZOFFSET` | `0x0286` | 646 | Magnetic Z offset |
+| `0x001C` | `MAGRANGX` | `0x01F4` | 500 | Magnetic calibration X range |
+| `0x001D` | `MAGRANGY` | `0x01F4` | 500 | Magnetic calibration Y range |
+| `0x001E` | `MAGRANGZ` | `0x01F4` | 500 | Magnetic calibration Z range |
+| `0x0025` | `FILTK` | `0x000A` | 10 | Dynamic filter setting |
+| `0x002A` | `ACCFILT` | `0x07D0` | 2000 | Acceleration filter setting |
+
+### Gyro Stillness And Response Settings
+
+| Address | Name | Raw value | Decoded value | Note |
+|---:|---|---:|---|---|
+| `0x0011` | `GPTPTIME` | `0x000A` | 10 s | Z-axis peak-to-peak acquisition time |
+| `0x0012` | `GYROBAIS` | `0x000D` | 0.013 deg/s | Z-axis zero bias value |
+| `0x0013` | `GBAISTIME` | `0x000A` | 10 s | Z-axis zero-bias acquisition time |
+| `0x0014` | `GSTATICTHRE` | `0x0032` | 0.050 deg/s | Z-axis static threshold |
+| `0x0015` | `GSTATICTIME` | `0x0064` | 0.100 s | Z-axis stabilization time |
+| `0x0016` | `PGSCALE` | `0x2710` | 1.0000 | Z-axis calibration factor P |
+| `0x0018` | `GSCALERANGE` | `0x02D0` | 720 deg | Z-axis calibration angle |
+| `0x0061` | `GYROCALITHR` | `0x0000` | 0 deg/s | Gyro still threshold |
+| `0x0063` | `GYROCALTIME` | `0x03E8` | 1000 ms | Gyro auto calibration time |
+| `0x006A` | `WERROR` | `0x0000` | 0 | Gyroscope change value |
+| `0x006E` | `WZTIME` | `0x01F4` | 500 ms | Angular velocity continuous rest time |
+| `0x006F` | `WZSTATIC` | `0x012C` | 0.300 deg/s | Angular velocity integration threshold |
+
+### Sample Data From Initial Dump
+
+These values are one sampled moment from the device, not fixed configuration defaults.
+
+| Address | Name | Raw value | Decoded value |
+|---:|---|---:|---|
+| `0x0034` | `AX` | `0xFF8B` | -0.057 g |
+| `0x0035` | `AY` | `0x0005` | 0.002 g |
+| `0x0036` | `AZ` | `0x07FF` | 1.000 g |
+| `0x0037` | `GX` | `0x0000` | 0.000 deg/s |
+| `0x0038` | `GY` | `0x0001` | 0.061 deg/s |
+| `0x0039` | `GZ` | `0x0000` | 0.000 deg/s |
+| `0x003A` | `HX` | `0x0EC9` | 3785 LSB |
+| `0x003B` | `HY` | `0x0179` | 377 LSB |
+| `0x003C` | `HZ` | `0xF25B` | -3493 LSB |
+| `0x003D`~`0x003E` | `Roll` | `0x0000009D` | 0.157 deg |
+| `0x003F`~`0x0040` | `Pitch` | `0x00000CE2` | 3.298 deg |
+| `0x0041`~`0x0042` | `Yaw` | `0x0002A88C` | 174.220 deg |
+| `0x0043` | `TEMP` | `0x0ACD` | 27.65 C |
+| `0x0051` | `q0` | `0x5F34` | 0.743774 |
+| `0x0052` | `q1` | `0xFDAA` | -0.018250 |
+| `0x0053` | `q2` | `0x02DD` | 0.022369 |
+| `0x0054` | `q3` | `0x5578` | 0.667725 |
 
 ## Modbus Read Frame
 

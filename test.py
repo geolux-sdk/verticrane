@@ -2,6 +2,21 @@ import device_model
 import time
 
 
+REGISTER_DUMP_RANGES = [
+    (0x00, 0x2B),
+    (0x2E, 0x01),
+    (0x30, 0x14),
+    (0x51, 0x04),
+    (0x61, 0x01),
+    (0x63, 0x01),
+    (0x69, 0x02),
+    (0x6E, 0x02),
+    (0x74, 0x01),
+    (0x7F, 0x06),
+    (0x95, 0x04),
+]
+
+
 # Called when device data is updated.
 def updateData(DeviceModel):
     data = DeviceModel.deviceData
@@ -33,11 +48,28 @@ def updateData(DeviceModel):
     )
 
 
+def dumpRegisters(device):
+    print("Register dump started")
+    for start, count in REGISTER_DUMP_RANGES:
+        print("Read registers: start=0x{0:04X}, count={1}".format(start, count))
+        device.readReg(start, count)
+        time.sleep(0.2)
+        for reg in range(start, start + count):
+            value = device.registerData.get(reg)
+            if value is not None:
+                signed_value = value - 0x10000 if value & 0x8000 else value
+                print("REG 0x{0:04X} = 0x{1:04X} ({2})".format(reg, value, signed_value))
+    print("Register dump finished")
+
+
 if __name__ == "__main__":
     # Create the device model.
     device = device_model.DeviceModel("Test Device", "COM11", 9600, 0x50, updateData)
     # Open the device.
     device.openDevice()
+    # Optional LED test, if the device model has a visible LED.
+    # device.writeReg(0x1B, 1)
+    dumpRegisters(device)
     try:
         # Enable loop reading.
         device.startLoopRead()
