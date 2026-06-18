@@ -4,11 +4,14 @@
 #   streamlit run dashboard.py
 #
 # Pick a CSV from data/ (or upload one) and view summary stats, time series,
-# the slope distribution, and the sway spectrum (FFT). Analysis only -- it does
-# not talk to the sensor.
+# the slope distribution, and the sway spectrum (FFT). Can also start a new
+# measurement, which launches log_tilt.py as a separate process (the dashboard
+# itself never opens the serial port).
 
 import glob
 import os
+import subprocess
+import sys
 import tempfile
 
 import numpy as np
@@ -27,6 +30,46 @@ def list_csvs():
     return sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
 
 
+LOGGER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_tilt.py")
+LOGGER_OUT = os.path.join(tempfile.gettempdir(), "verticrane_logger.out")
+
+
+def logger_running():
+    p = st.session_state.get("logger_proc")
+    return p is not None and p.poll() is None
+
+
+def start_logger(minutes):
+    # Remember the existing files so we can spot the new one this run creates.
+    st.session_state["logger_before"] = set(list_csvs())
+    out = open(LOGGER_OUT, "w")
+    st.session_state["logger_proc"] = subprocess.Popen(
+        [sys.executable, LOGGER_SCRIPT, str(minutes)],
+        cwd=os.path.dirname(LOGGER_SCRIPT), stdout=out, stderr=subprocess.STDOUT)
+    out.close()  # the child keeps its own dup of the handle
+    st.session_state["was_running"] = True
+
+
+def stop_logger():
+    p = st.session_state.get("logger_proc")
+    if p is not None and p.poll() is None:
+        p.terminate()
+
+
+def newest_active_csv():
+    before = st.session_state.get("logger_before", set())
+    new = sorted(set(list_csvs()) - before)
+    return new[-1] if new else None
+
+
+def csv_rows(path):
+    try:
+        with open(path) as fh:
+            return max(sum(1 for _ in fh) - 1, 0)
+    except Exception:
+        return 0
+
+
 @st.cache_data
 def read_csv(path, _mtime):
     # _mtime busts the cache when the file changes.
@@ -36,11 +79,46 @@ def read_csv(path, _mtime):
 st.set_page_config(page_title="Tilt Log Dashboard", layout="wide")
 st.sidebar.title("Tilt Log")
 
+# --- Measurement control: run the logger as a separate process ---
+st.sidebar.header("Measurement")
+minutes = st.sidebar.number_input("duration (min)", min_value=0.1, max_value=120.0,
+                                  value=10.0, step=1.0)
+b_start, b_stop = st.sidebar.columns(2)
+if b_start.button("Start", disabled=logger_running(), use_container_width=True):
+    start_logger(minutes)
+    st.rerun()
+if b_stop.button("Stop", disabled=not logger_running(), use_container_width=True):
+    stop_logger()
+    st.rerun()
+
+
+@st.fragment(run_every=2)
+def measurement_status():
+    if logger_running():
+        active = newest_active_csv()
+        st.sidebar.info("Measuring... {0} samples".format(csv_rows(active) if active else 0))
+    elif st.session_state.get("was_running"):
+        # Just finished: full refresh so the new file appears in the list below.
+        st.session_state["was_running"] = False
+        st.rerun()
+
+
+measurement_status()
+
+with st.sidebar.expander("Logger output"):
+    try:
+        with open(LOGGER_OUT) as fh:
+            st.code(fh.read()[-2000:] or "(empty)")
+    except FileNotFoundError:
+        st.caption("no logger run yet")
+
 # --- Choose a data source: a file from data/ or an upload ---
-files = list_csvs()
+# While measuring, hide the in-progress file (it is still being written).
+active_file = newest_active_csv() if logger_running() else None
+review_files = [f for f in list_csvs() if f != active_file]
 selected = st.sidebar.selectbox(
-    "Files in data/", files, index=len(files) - 1,
-    format_func=os.path.basename) if files else None
+    "Files in data/", review_files, index=len(review_files) - 1,
+    format_func=os.path.basename) if review_files else None
 uploaded = st.sidebar.file_uploader("or upload a CSV", type=["csv"])
 st.sidebar.caption("Threshold: {0}% (1/1000)".format(SLOPE_THRESHOLD_PCT))
 
