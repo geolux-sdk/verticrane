@@ -345,7 +345,7 @@ class DeviceModel:
         self.sendData(self.get_readBytes(self.ADDR, regAddr, regCount))
 
     # Write a register.
-    def writeReg(self, regAddr, sValue):
+    def writeReg(self, regAddr, sValue, save=False):
         # Unlock before writing.
         self.unlock()
         # Delay 100 ms.
@@ -354,8 +354,9 @@ class DeviceModel:
         self.sendData(self.get_writeBytes(self.ADDR, regAddr, sValue))
         # Delay 100 ms.
         time.sleep(0.1)
-        # Save the device settings.
-        self.save()
+        if save:
+            # Save the device settings only when explicitly requested.
+            self.save()
 
     # Build a read command.
     def get_readBytes(self, devid, regAddr, regCount):

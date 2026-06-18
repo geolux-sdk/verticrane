@@ -88,5 +88,7 @@ if __name__ == "__main__":
     # Get the read result.
     # device.get(str(0x3a))
 
-    # Write value 50 to register 0x65.
+    # Write value 50 to register 0x65 without saving it permanently.
     # device.writeReg(0x65, 50)
+    # Write value 50 to register 0x65 and save it permanently.
+    # device.writeReg(0x65, 50, save=True)

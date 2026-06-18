@@ -204,7 +204,7 @@ Important write flow:
 
 1. Write unlock key before write operations.
 2. Send the write command within 10 seconds.
-3. Save if the setting must persist.
+3. Save only if the setting must persist.
 
 Unlock register:
 
@@ -220,6 +220,13 @@ Save/reboot/reset register:
 - Save value: `0x0000`
 - Reboot value: `0x00FF`
 - Factory reset value: `0x0001`
+
+Current code behavior:
+
+- `writeReg(regAddr, value)` writes a register without sending `SAVE`.
+- `writeReg(regAddr, value, save=True)` writes a register and then sends `SAVE`.
+- Use `save=True` only for settings that should remain after power cycle.
+- For tests, keep `save=False` so temporary changes are not intentionally persisted.
 
 ## Data Registers Used By Current Code
 
