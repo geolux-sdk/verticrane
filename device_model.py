@@ -36,6 +36,9 @@ class DeviceModel:
     # Serial port
     serialPort = None
 
+    # Serial receive thread
+    readThread = None
+
     # Serial port configuration
     serialConfig = SerialConfig()
 
@@ -145,8 +148,8 @@ class DeviceModel:
             self.isOpen = True
             print("{} opened".format(self.serialConfig.portName))
             # Start a thread to continuously listen for serial port data.
-            t = threading.Thread(target=self.readDataTh, args=("Data-Received-Thread", 10,))
-            t.start()
+            self.readThread = threading.Thread(target=self.readDataTh, args=("Data-Received-Thread", 10,))
+            self.readThread.start()
             print("Device opened successfully")
         except SerialException:
             print("Failed to open " + self.serialConfig.portName)
@@ -161,6 +164,7 @@ class DeviceModel:
                     tLen = self.serialPort.inWaiting()
                     if tLen > 0:
                         data = self.serialPort.read(tLen)
+                        print("RX: {}".format(data.hex(" ").upper()))
                         self.onDataReceived(data)
                 except Exception as ex:
                     print(ex)
@@ -171,10 +175,14 @@ class DeviceModel:
 
     # Close the device.
     def closeDevice(self):
+        self.isOpen = False
+        if self.readThread is not None and self.readThread.is_alive() and self.readThread is not threading.current_thread():
+            self.readThread.join(timeout=1.0)
+        self.readThread = None
         if self.serialPort is not None:
             self.serialPort.close()
+            self.serialPort = None
             print("Port closed")
-        self.isOpen = False
         print("Device closed")
 
     # region Data parsing
@@ -264,9 +272,40 @@ class DeviceModel:
             num -= pow(2, 32)
         return num
 
+    @staticmethod
+    def formatBytes(data):
+        return " ".join("{:02X}".format(val & 0xff) for val in data)
+
+    def logModbusTx(self, data):
+        if len(data) < 6:
+            print("MODBUS TX: frame too short")
+            return
+
+        slave = data[0]
+        function = data[1]
+        register = (data[2] << 8) | data[3]
+        value = (data[4] << 8) | data[5]
+
+        if function == 0x03:
+            print(
+                "MODBUS READ: slave=0x{0:02X}, func=0x03, start=0x{1:04X}, count={2}".format(
+                    slave, register, value
+                )
+            )
+        elif function == 0x06:
+            print(
+                "MODBUS WRITE: slave=0x{0:02X}, func=0x06, register=0x{1:04X}, value=0x{2:04X}".format(
+                    slave, register, value
+                )
+            )
+        else:
+            print("MODBUS TX: slave=0x{0:02X}, func=0x{1:02X}".format(slave, function))
+
     # Send serial port data.
     def sendData(self, data):
         try:
+            self.logModbusTx(data)
+            print("TX: {}".format(self.formatBytes(data)))
             self.serialPort.write(data)
         except Exception as ex:
             print(ex)
