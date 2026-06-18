@@ -10,10 +10,16 @@
 
 import csv
 import math
+import os
 import sys
 import time
 
+import analyze_tilt
 from hwt9037_485 import HWT9037_485
+
+
+# All measurements (CSV + matching analysis .txt) are stored here.
+OUTPUT_DIR = "data"
 
 
 PORT_NAME = "COM11"
@@ -67,7 +73,8 @@ def main():
     # Silence per-transaction Modbus prints during high-rate logging.
     device.verbose = False
 
-    filename = "tilt_log_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    filename = os.path.join(OUTPUT_DIR, "tilt_log_{0}.csv".format(time.strftime("%Y%m%d_%H%M%S")))
     print("Logging {0:.1f} min at {1:.0f} Hz -> {2}".format(minutes, SAMPLE_RATE_HZ, filename))
     print("Press Ctrl+C to stop early.")
 
@@ -139,6 +146,14 @@ def main():
     rate = samples / elapsed if elapsed > 0 else 0.0
     print("Done: {0} samples in {1:.1f} s ({2:.1f} Hz) -> {3}".format(
         samples, elapsed, rate, filename))
+
+    # Write an analysis report alongside the CSV (same base name, .txt).
+    if samples > 0:
+        report = analyze_tilt.analyze(filename)
+        txt_path = os.path.splitext(filename)[0] + ".txt"
+        with open(txt_path, "w", encoding="utf-8") as fh:
+            fh.write(report + "\n")
+        print("Analysis report -> {0}".format(txt_path))
 
 
 if __name__ == "__main__":

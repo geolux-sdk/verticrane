@@ -1,2 +1,8 @@
 __pycache__/
 *.py[cod]
+
+# Measurement data (logs and analysis reports)
+data/
+
+# Local per-machine Claude Code settings
+.claude/settings.local.json
