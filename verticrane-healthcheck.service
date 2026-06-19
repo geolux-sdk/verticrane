@@ -1,0 +1,15 @@
+# Oneshot health check for the Verticrane dashboard. Triggered by the timer below.
+# Install alongside verticrane-dashboard.service:
+#   sudo cp ~/verticrane/verticrane-healthcheck.service /etc/systemd/system/
+#   sudo cp ~/verticrane/verticrane-healthcheck.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now verticrane-healthcheck.timer
+# Adjust the path below if you did not clone to /home/pi/verticrane.
+
+[Unit]
+Description=Verticrane dashboard health check
+After=verticrane-dashboard.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/pi/verticrane/healthcheck.sh

@@ -136,3 +136,20 @@ sudo systemctl disable verticrane-dashboard # 자동 시작 해제
 > 코드 업데이트(`./update.sh`) 후에는 `sudo systemctl restart verticrane-dashboard`로
 > 새 코드를 반영하세요. 서비스로 띄우면 `./run_dashboard.sh`는 따로 실행하지 마세요
 > (포트 8501 충돌).
+
+서비스에는 `StartLimitIntervalSec=0`이 있어 반복 크래시에도 재시작을 포기하지 않습니다.
+
+### 헬스체크 워치독 (선택)
+
+`Restart=always`는 프로세스가 죽었을 때만 재시작합니다. **살아있지만 무응답**인
+상태까지 잡으려면 헬스체크 타이머를 등록하세요 (매 1분 HTTP 헬스 확인 → 실패 시 재시작):
+
+```bash
+sudo cp ~/verticrane/verticrane-healthcheck.service /etc/systemd/system/
+sudo cp ~/verticrane/verticrane-healthcheck.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now verticrane-healthcheck.timer
+
+systemctl list-timers verticrane-healthcheck.timer   # 다음 실행 시각 확인
+journalctl -u verticrane-healthcheck -n 20           # 동작 로그
+```

@@ -9,6 +9,8 @@
 Description=Verticrane tilt dashboard (Streamlit)
 After=network-online.target
 Wants=network-online.target
+# Never give up restarting (default start-limit would stop after rapid crashes).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

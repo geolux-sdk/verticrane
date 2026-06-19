@@ -1,0 +1,10 @@
+# Run the Verticrane dashboard health check every minute (2 min after boot).
+[Unit]
+Description=Run Verticrane dashboard health check periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
