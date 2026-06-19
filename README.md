@@ -103,12 +103,20 @@ run_dashboard.bat
 ### 자가 점검 (test.py)
 
 대시보드가 쓰는 전 기능(포트·설정·분석·로거·센서통신/라이브)을 한 번에 점검합니다.
+`test.sh`는 자동으로 `.venv` 파이썬을 사용하고 인자를 그대로 전달합니다.
 
 ```bash
-.venv/bin/python test.py                 # 전체 (센서 필요), 라이브 1초
-.venv/bin/python test.py --seconds 10    # 라이브 측정 10초
-.venv/bin/python test.py --no-hardware   # 소프트웨어만 (센서 없이)
-.venv/bin/python test.py --port /dev/ttyUSB0
+# 라즈베리파이 / Linux (venv 자동)
+./test.sh                    # 전체 (센서 필요), 라이브 1초
+./test.sh --seconds 10       # 라이브 측정 10초
+./test.sh --no-hardware      # 소프트웨어만 (센서 없이)
+./test.sh --port /dev/ttyUSB0
+
+# 직접 호출도 가능
+.venv/bin/python test.py --seconds 10
+
+# Windows
+python test.py
 ```
 
 `N/N 통과`가 나오면 정상입니다. (종료코드 0=성공, 1=실패)
