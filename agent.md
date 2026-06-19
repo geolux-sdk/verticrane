@@ -21,7 +21,7 @@ Raspberry Pi setup (USB-RS485 adapter, `dialout` permissions, port selection).
 ## Working Rules
 
 - Keep source comments and runtime messages in English.
-- Before editing code, explain the intended change direction and wait for user approval.
+- Make focused edits directly without waiting for approval; briefly state what you are changing as you go.
 - Do not commit generated Python cache files such as `__pycache__/` or `*.pyc`.
 - Keep changes focused on the requested behavior.
 - Before changing serial protocol logic, inspect the surrounding packet format and CRC handling.
