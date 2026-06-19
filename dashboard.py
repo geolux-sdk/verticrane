@@ -197,9 +197,18 @@ st.sidebar.caption("임계값: {0}% (1/1000)".format(SLOPE_THRESHOLD_PCT))
 
 path = None
 if uploaded is not None:
-    path = os.path.join(tempfile.gettempdir(), uploaded.name)
-    with open(path, "wb") as f:
-        f.write(uploaded.getbuffer())
+    # Save uploads into data/ (assuming unique names) so they appear in the list and
+    # get a .txt report, like a logged measurement. Done once: skip if it exists, so
+    # Streamlit's per-interaction reruns don't re-save and re-analyze every time.
+    path = os.path.join(DATA_DIR, uploaded.name)
+    if not os.path.exists(path):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(uploaded.getbuffer())
+        txt_path = os.path.splitext(path)[0] + ".txt"
+        with open(txt_path, "w", encoding="utf-8") as fh:
+            fh.write(analyze_tilt.analyze(path) + "\n")
+        st.toast("업로드 파일을 data/에 저장하고 리포트를 생성했습니다: {0}".format(uploaded.name))
 elif selected:
     path = selected
 
