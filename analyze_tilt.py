@@ -125,14 +125,19 @@ def analyze(csv_path):
     if n > 1 and rate > 0:
         s = np.asarray(slope, dtype=float)
         s = s - s.mean()
-        amp = np.abs(np.fft.rfft(s * np.hanning(len(s))))
+        win = np.hanning(len(s))
+        amp = np.abs(np.fft.rfft(s * win))
         freq = np.fft.rfftfreq(len(s), d=1.0 / rate)
+        # Single-sided physical amplitude in slope %, corrected for the Hann
+        # window's coherent gain (sum of window), then the matching tilt angle.
+        amp_pct = 2.0 * amp / win.sum()
         top = _top_peaks(amp, 3)
         if top:
             for rank, i in enumerate(top, 1):
                 period = 1.0 / freq[i] if freq[i] > 0 else float("inf")
-                L.append("#{0}  {1:.3f} Hz  (주기 {2:.2f} s)  진폭 {3:.4f}".format(
-                    rank, freq[i], period, amp[i]))
+                deg = math.degrees(math.atan(amp_pct[i] / 100.0))
+                L.append("#{0}  {1:.3f} Hz  (주기 {2:.2f} s)  진폭 {3:.4f} % ({4:.4f} deg)".format(
+                    rank, freq[i], period, amp_pct[i], deg))
         else:
             L.append("뚜렷한 스펙트럼 피크 없음")
     else:
