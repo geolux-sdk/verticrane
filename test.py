@@ -27,6 +27,9 @@ from port_config import add_port_argument, resolve_port
 CSV_COLUMNS = ("timestamp,elapsed_s,Roll_deg,Pitch_deg,Yaw_deg,slope_pct,"
                "AccX_g,AccY_g,AccZ_g,GyroX_dps,GyroY_dps,GyroZ_dps,Temp_C")
 
+# Live-sample rate for the hardware check, matching log_tilt's 25 Hz logging.
+SAMPLE_PERIOD_S = 0.04
+
 _results = []
 
 
@@ -75,9 +78,9 @@ def check_logger_module():
     return ok, "log_tilt 및 의존 모듈 로드 OK"
 
 
-def check_hardware(port):
-    # One connection: decode the config (read_status) and read a few live samples
-    # (the measurement path), so this verifies both with a single auto-baud probe.
+def check_hardware(port, seconds):
+    # One connection: decode the config (read_status) and read live samples for the
+    # requested duration (the measurement path), so a single auto-baud probe covers both.
     device, baud = read_status.connectAutoBaud(port)
     if device is None:
         return False, "장치 무응답 ({0})".format(port)
@@ -87,19 +90,28 @@ def check_hardware(port):
         vals = read_status.decode_status(device)
 
         good = 0
+        total = 0
         last_slope = None
-        for _ in range(10):
+        start = time.perf_counter()
+        next_tick = start
+        while time.perf_counter() - start < seconds:
             device.readReg(0x34, 15)
+            total += 1
             roll = device.deviceData.get("AngX")
             pitch = device.deviceData.get("AngY")
             if roll is not None and pitch is not None:
                 good += 1
                 last_slope = resultant_slope_pct(roll, pitch)
-            time.sleep(0.05)
+            next_tick += SAMPLE_PERIOD_S
+            sleep_for = next_tick - time.perf_counter()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
-        ok = good >= 5 and vals.get("fw_version") not in (None, "-")
-        detail = "{0} bps · fw {1} · {2} · 라이브 {3}/10 · slope {4}".format(
-            baud, vals.get("fw_version"), vals.get("algorithm"), good,
+        elapsed = time.perf_counter() - start
+        rate = good / elapsed if elapsed > 0 else 0.0
+        ok = good >= 1 and good >= total * 0.5 and vals.get("fw_version") not in (None, "-")
+        detail = "{0} bps · fw {1} · {2} · {3:.1f}s 동안 {4}/{5} 샘플 ({6:.1f} Hz) · slope {7}".format(
+            baud, vals.get("fw_version"), vals.get("algorithm"), elapsed, good, total, rate,
             "{0:.4f}%".format(last_slope) if last_slope is not None else "-")
         return ok, detail
     finally:
@@ -112,6 +124,8 @@ def main():
     add_port_argument(parser)
     parser.add_argument("--no-hardware", action="store_true",
                         help="Skip checks that need the sensor connected.")
+    parser.add_argument("--seconds", type=float, default=1.0,
+                        help="Live-sample duration for the hardware check (seconds, default 1.0).")
     args = parser.parse_args()
     port = resolve_port(args.port)
 
@@ -126,7 +140,7 @@ def main():
     if args.no_hardware:
         print("[SKIP] 센서 통신 + 라이브 (--no-hardware)")
     else:
-        check("센서 통신 + 라이브 (read_status)", lambda: check_hardware(port))
+        check("센서 통신 + 라이브 (read_status)", lambda: check_hardware(port, args.seconds))
 
     passed = sum(1 for ok in _results if ok)
     total = len(_results)
