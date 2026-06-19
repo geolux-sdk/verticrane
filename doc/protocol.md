@@ -266,6 +266,13 @@ Save / reboot / factory reset.
 
 - `0x00`: ±2g, `0x03`: ±16g.
 - Adaptive: internally switches to 16g automatically when acceleration exceeds 2g.
+- **On this HWT9037-485 unit the register is fixed at `0x03` (±16g) and cannot be
+  changed**, like `GYRORANGE`. Writing `0x00`/`0x01` is ACK'd (Modbus func 0x06 returns
+  success) but the value is ignored — an immediate read still returns `0x03`. Verified
+  2026-06-19 with RAM-only write, write+reboot (`SAVE`=`0x00FF`), and save+reboot; none
+  took effect. Acceleration output is therefore always 16g full-scale (at rest AccZ raw
+  ≈ 2050 = 1g), so the fixed `AX/32768*16` conversion stays correct. See
+  `compare_accrange.py` for the diagnostic.
 
 ### `SLEEP` (`0x22`)
 

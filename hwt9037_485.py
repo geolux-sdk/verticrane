@@ -260,6 +260,13 @@ class HWT9037_485:
     def save(self):
         self._write(0x00, 0x0000)
 
+    # Reboot the device (SAVE register 0x00 <- 0x00FF). Reloads configuration without
+    # writing flash; the device stops responding for a moment while it restarts.
+    def reboot(self):
+        self.unlock()
+        time.sleep(0.1)
+        self._write(0x00, 0x00FF)
+
     @staticmethod
     def getSignInt16(num):
         if num >= pow(2, 15):
