@@ -12,12 +12,17 @@ pip 설치를 막습니다(`externally-managed-environment` 오류). 그래서
 
 ```bash
 cd ~/verticrane
-chmod +x install_requirements.sh run_dashboard.sh   # 실행 권한 (한 번만)
-
-# venv 도구가 없으면 먼저 설치
-sudo apt update && sudo apt install -y python3-venv python3-full
+chmod +x *.sh                    # 실행 권한 (한 번만)
 
 ./install_requirements.sh        # .venv 생성 + 의존성 설치 (sudo 없이!)
+```
+
+`python3-venv`는 라즈베리파이 OS에 보통 이미 설치돼 있습니다. 혹시 venv 생성에서
+막히면 그때만 설치하세요 (`python3-full`은 불필요):
+
+```bash
+sudo apt update                  # 먼저 인덱스 갱신 (안 하면 404 발생 가능)
+sudo apt install -y python3-venv
 ```
 
 라즈베리파이(ARM)에서는 pip이 [piwheels](https://www.piwheels.org/)의 미리 빌드된
