@@ -10,6 +10,8 @@ import math
 import os
 import sys
 
+import numpy as np
+
 # Requirement targets for this project.
 ANGLE_REQ_DEG = 0.01     # required tilt accuracy
 SLOPE_THRESH_PCT = 0.1   # alarm threshold (1/1000 = 0.1%)
@@ -33,6 +35,18 @@ def _moving(x, w, median):
         else:
             out.append(sum(seg) / len(seg))
     return out
+
+
+def _top_peaks(amp, k):
+    # Indices of the k strongest local maxima, excluding the DC bin.
+    ac = amp.copy()
+    ac[0] = 0.0
+    maxima = [i for i in range(1, len(ac) - 1)
+              if ac[i] > ac[i - 1] and ac[i] >= ac[i + 1]]
+    if not maxima and len(ac) > 1:
+        maxima = [int(np.argmax(ac))]
+    maxima.sort(key=lambda i: ac[i], reverse=True)
+    return maxima[:k]
 
 
 def _read(csv_path):
@@ -103,6 +117,26 @@ def analyze(csv_path):
                           ("moving-median", _moving(slope, w, True))):
         _, sd, _, _, pp = _stats(series)
         L.append("{0:<16}{1:>11.4f}{2:>11.4f}".format(label, pp, sd))
+    L.append("")
+
+    # Sway spectrum: dominant frequencies (FFT of slope).
+    L.append("Sway spectrum (FFT of slope) - top 3 peaks")
+    L.append("-" * 60)
+    if n > 1 and rate > 0:
+        s = np.asarray(slope, dtype=float)
+        s = s - s.mean()
+        amp = np.abs(np.fft.rfft(s * np.hanning(len(s))))
+        freq = np.fft.rfftfreq(len(s), d=1.0 / rate)
+        top = _top_peaks(amp, 3)
+        if top:
+            for rank, i in enumerate(top, 1):
+                period = 1.0 / freq[i] if freq[i] > 0 else float("inf")
+                L.append("#{0}  {1:.3f} Hz  (period {2:.2f} s)  amplitude {3:.4f}".format(
+                    rank, freq[i], period, amp[i]))
+        else:
+            L.append("no clear spectral peak")
+    else:
+        L.append("insufficient data for spectrum")
     L.append("")
 
     # Plain-language assessment against the project targets.

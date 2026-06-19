@@ -219,8 +219,24 @@ with right:
         amp = np.abs(np.fft.rfft(s * window))
         freq = np.fft.rfftfreq(len(s), d=1.0 / fs)
         spec.add_trace(go.Scatter(x=freq, y=amp, line=dict(width=1)))
-        peak = freq[1:][np.argmax(amp[1:])] if len(amp) > 2 else 0.0
-        spec.update_layout(title_text="dominant ~ {0:.3f} Hz".format(peak))
+        # Top-3 spectral peaks (local maxima, excluding the DC bin).
+        ac = amp.copy()
+        ac[0] = 0.0
+        maxima = [i for i in range(1, len(ac) - 1)
+                  if ac[i] > ac[i - 1] and ac[i] >= ac[i + 1]]
+        if not maxima and len(ac) > 1:
+            maxima = [int(np.argmax(ac))]
+        maxima.sort(key=lambda i: ac[i], reverse=True)
+        top = maxima[:3]
+        if top:
+            spec.add_trace(go.Scatter(
+                x=freq[top], y=amp[top], mode="markers+text",
+                marker=dict(color="crimson", size=9),
+                text=["{0:.3f} Hz".format(freq[i]) for i in top],
+                textposition="top center", showlegend=False))
+            labels = ["#{0} {1:.3f} Hz".format(r + 1, freq[i])
+                      for r, i in enumerate(top)]
+            spec.update_layout(title_text="peaks: " + ", ".join(labels))
     spec.update_xaxes(title_text="frequency (Hz)", range=[0, min(5.0, fs / 2)])
     spec.update_yaxes(title_text="amplitude")
     spec.update_layout(height=350, margin=dict(t=30))
