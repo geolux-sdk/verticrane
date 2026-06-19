@@ -221,6 +221,10 @@ ma_win = max(1, int(round(MA_SECONDS * fs)))
 slope_ma = moving_average(slope, ma_win)
 slope_peak = float(np.nanmax(slope_ma)) if len(slope_ma) else float("nan")
 
+# Resultant tilt angle (deg) from the slope %; always >= 0 (it is a magnitude).
+tilt = np.degrees(np.arctan(slope / 100.0))
+tilt_ma = np.degrees(np.arctan(slope_ma / 100.0))
+
 # --- Summary metrics ---
 cols = st.columns(6)
 cols[0].metric("샘플 수", n)
@@ -237,28 +241,24 @@ else:
     st.success("1초 평균 기울기 피크 {0:.4f}%가 임계값 {1}% 이내입니다".format(
         slope_peak, SLOPE_THRESHOLD_PCT))
 
-# --- Time series (angles + slope on a secondary axis) ---
+# --- Time series: resultant tilt, read on both deg (left) and % (right) axes ---
 ts = make_subplots(specs=[[{"secondary_y": True}]])
-ts.add_trace(go.Scatter(x=t, y=roll, name="Roll", line=dict(width=1)), secondary_y=False)
-ts.add_trace(go.Scatter(x=t, y=pitch, name="Pitch", line=dict(width=1)), secondary_y=False)
-ts.add_trace(go.Scatter(x=t, y=slope, name="기울기 %", line=dict(width=1, color="crimson")),
-             secondary_y=True)
-if len(slope_ma):
+ts.add_trace(go.Scatter(x=t, y=tilt, name="기울기", line=dict(width=1, color="crimson")),
+             secondary_y=False)
+if len(tilt_ma):
     # Align x to the actual moving-average length: the window-1 trailing offset
     # in the normal case, or the full series when the log is shorter than ma_win.
-    ts.add_trace(go.Scatter(x=t[-len(slope_ma):], y=slope_ma, name="기울기 1초평균",
-                            line=dict(width=2, color="darkred")), secondary_y=True)
+    ts.add_trace(go.Scatter(x=t[-len(tilt_ma):], y=tilt_ma, name="기울기 1초평균",
+                            line=dict(width=2, color="darkred")), secondary_y=False)
 ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
-             secondary_y=True, annotation_text="+{0}%".format(SLOPE_THRESHOLD_PCT))
-ts.add_hline(y=-SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
-             secondary_y=True, annotation_text="-{0}%".format(SLOPE_THRESHOLD_PCT))
+             secondary_y=True, annotation_text="{0}%".format(SLOPE_THRESHOLD_PCT))
 ts.update_xaxes(title_text="경과 시간 (s)")
-# Slope % = tan(angle) * 100, so link the right (%) axis to the left (deg) axis:
-# the same height means the same physical tilt on both scales.
+# Tilt is a magnitude (>= 0). Slope % = tan(angle)*100, so link the right (%) axis to
+# the left (deg) axis: the same plot height is the same physical tilt on both scales.
 ANGLE_RANGE_DEG = 2.0
 slope_eq_pct = float(np.tan(np.radians(ANGLE_RANGE_DEG)) * 100.0)
-ts.update_yaxes(title_text="각도 (deg)", range=[-ANGLE_RANGE_DEG, ANGLE_RANGE_DEG], secondary_y=False)
-ts.update_yaxes(title_text="기울기 (%)", range=[-slope_eq_pct, slope_eq_pct], secondary_y=True)
+ts.update_yaxes(title_text="기울기 (deg)", range=[0, ANGLE_RANGE_DEG], secondary_y=False)
+ts.update_yaxes(title_text="기울기 (%)", range=[0, slope_eq_pct], secondary_y=True)
 ts.update_layout(height=420, margin=dict(t=30, b=10), legend=dict(orientation="h"))
 st.subheader("시계열")
 st.plotly_chart(ts, width="stretch")
