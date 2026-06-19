@@ -253,8 +253,12 @@ ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
 ts.add_hline(y=-SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
              secondary_y=True, annotation_text="-{0}%".format(SLOPE_THRESHOLD_PCT))
 ts.update_xaxes(title_text="경과 시간 (s)")
-ts.update_yaxes(title_text="각도 (deg)", range=[-2, 2], secondary_y=False)
-ts.update_yaxes(title_text="기울기 (%)", secondary_y=True)
+# Slope % = tan(angle) * 100, so link the right (%) axis to the left (deg) axis:
+# the same height means the same physical tilt on both scales.
+ANGLE_RANGE_DEG = 2.0
+slope_eq_pct = float(np.tan(np.radians(ANGLE_RANGE_DEG)) * 100.0)
+ts.update_yaxes(title_text="각도 (deg)", range=[-ANGLE_RANGE_DEG, ANGLE_RANGE_DEG], secondary_y=False)
+ts.update_yaxes(title_text="기울기 (%)", range=[-slope_eq_pct, slope_eq_pct], secondary_y=True)
 ts.update_layout(height=420, margin=dict(t=30, b=10), legend=dict(orientation="h"))
 st.subheader("시계열")
 st.plotly_chart(ts, width="stretch")
