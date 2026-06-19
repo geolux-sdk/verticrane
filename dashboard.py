@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 import numpy as np
 import pandas as pd
@@ -21,9 +22,33 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import analyze_tilt
+import read_status
 
 DATA_DIR = "data"
 SLOPE_THRESHOLD_PCT = 0.1  # 0.1% = 1/1000 alarm threshold
+
+# Korean labels for the sensor-status panel, keyed by read_status.STATUS_LAYOUT keys.
+STATUS_GROUP_LABELS = {
+    "identity": "식별 / 통신",
+    "mode": "동작 모드",
+    "filters": "필터",
+}
+STATUS_FIELD_LABELS = {
+    "fw_version": "펌웨어 버전",
+    "serial_number": "시리얼 번호",
+    "modbus_addr": "Modbus 주소",
+    "baud_rate": "통신 속도",
+    "rs485_delay": "RS485 응답 지연",
+    "work_mode": "작동 모드",
+    "bandwidth": "대역폭",
+    "gyro_range": "자이로 범위",
+    "acc_range": "가속도 범위",
+    "algorithm": "알고리즘",
+    "installation": "설치 방향",
+    "power_state": "전원 상태",
+    "filter_k": "동적 필터(K)",
+    "acc_filter": "가속도 필터",
+}
 
 
 def list_csvs():
@@ -60,6 +85,28 @@ def newest_active_csv():
     before = st.session_state.get("logger_before", set())
     new = sorted(set(list_csvs()) - before)
     return new[-1] if new else None
+
+
+def render_device_status():
+    # Shown only after the user has clicked the status button at least once.
+    if "device_status" not in st.session_state:
+        return
+    status = st.session_state["device_status"]
+    with st.expander("센서 상태 정보", expanded=True):
+        if status is None:
+            st.error("센서에 연결하지 못했습니다. 포트 연결과 전원을 확인하고, "
+                     "측정 중이라면 정지한 뒤 다시 시도하세요.")
+            return
+        st.caption("{0} · {1} bps · 읽은 시각 {2}".format(
+            status["port"], status["baud"], st.session_state.get("device_status_time", "-")))
+        cols = st.columns(len(read_status.STATUS_LAYOUT))
+        values = status["values"]
+        for col, (gkey, gtitle, fields) in zip(cols, read_status.STATUS_LAYOUT):
+            with col:
+                st.markdown("**{0}**".format(STATUS_GROUP_LABELS.get(gkey, gtitle)))
+                rows = [{"항목": STATUS_FIELD_LABELS.get(fkey, flabel), "값": values.get(fkey, "-")}
+                        for fkey, flabel in fields]
+                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
 def csv_rows(path):
@@ -123,6 +170,17 @@ with st.sidebar.expander("로거 출력"):
     except FileNotFoundError:
         st.caption("아직 실행된 로거가 없습니다")
 
+# --- Sensor status: read the device configuration on demand ---
+# The serial port is single-owner, so this is disabled while a measurement holds it.
+st.sidebar.header("센서 정보")
+if st.sidebar.button("센서 상태 읽기", disabled=logger_running(), use_container_width=True):
+    with st.spinner("센서 상태를 읽는 중... (몇 초 걸릴 수 있습니다)"):
+        st.session_state["device_status"] = read_status.read_device_status()
+    st.session_state["device_status_time"] = time.strftime("%H:%M:%S")
+    st.rerun()
+if logger_running():
+    st.sidebar.caption("측정 중에는 상태를 읽을 수 없습니다 (포트 사용 중)")
+
 # --- Choose a data source: a file from data/ or an upload ---
 # While measuring, hide the in-progress file (it is still being written).
 active_file = newest_active_csv() if logger_running() else None
@@ -132,6 +190,9 @@ selected = st.sidebar.selectbox(
     format_func=os.path.basename) if review_files else None
 uploaded = st.sidebar.file_uploader("또는 CSV 업로드", type=["csv"])
 st.sidebar.caption("임계값: {0}% (1/1000)".format(SLOPE_THRESHOLD_PCT))
+
+# Sensor status panel (independent of the CSV selection below).
+render_device_status()
 
 path = None
 if uploaded is not None:

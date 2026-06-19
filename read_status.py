@@ -1,15 +1,15 @@
 # coding:UTF-8
 # Read the current HWT9037-485 device status and print a decoded report.
+#
+# Also exposes read_device_status(), which returns the decoded configuration as a
+# structured dict (reused by the dashboard's sensor-status panel).
 
 import argparse
-import time
 
 from hwt9037_485 import HWT9037_485
 from port_config import add_port_argument, resolve_port
 
 
-# Resolved from --port / VERTICRANE_PORT / auto-detect in main().
-PORT_NAME = None
 DEVICE_ADDR = 0x50
 # The device powers on at 9600 bps (factory default) but can be switched and saved to a
 # higher rate. Probe the likely rates and use whichever one answers.
@@ -34,6 +34,33 @@ SLEEP_MAP = {0: "awake", 1: "sleep"}
 # endregion
 
 
+# Ordered status layout shared by the text report and the dashboard panel:
+#   (group_key, group_title, [(field_key, field_label), ...])
+# Live measurements are intentionally excluded -- this is configuration/status only.
+STATUS_LAYOUT = [
+    ("identity", "Identity & Communication", [
+        ("fw_version", "Firmware version"),
+        ("serial_number", "Serial number"),
+        ("modbus_addr", "Modbus address"),
+        ("baud_rate", "Baud rate"),
+        ("rs485_delay", "RS485 resp. delay"),
+    ]),
+    ("mode", "Operating Mode", [
+        ("work_mode", "Work mode"),
+        ("bandwidth", "Bandwidth"),
+        ("gyro_range", "Gyroscope range"),
+        ("acc_range", "Acceleration range"),
+        ("algorithm", "Algorithm"),
+        ("installation", "Installation"),
+        ("power_state", "Power state"),
+    ]),
+    ("filters", "Filters", [
+        ("filter_k", "Dynamic filter (K)"),
+        ("acc_filter", "Acceleration filter"),
+    ]),
+]
+
+
 def signed16(value):
     return value - 0x10000 if value & 0x8000 else value
 
@@ -54,70 +81,59 @@ def fmt(label, value):
     print("  {0:<22} {1}".format(label, value))
 
 
-def printStatus(device, baud):
+# Read the configuration/status registers in a few contiguous blocks.
+def read_config_registers(device):
+    device.readReg(0x04, 1)    # BAUD
+    device.readReg(0x0E, 1)    # WORKMODE
+    device.readReg(0x1A, 1)    # IICADDR
+    device.readReg(0x1F, 6)    # BANDWIDTH..AXIS6 (0x1F~0x24)
+    device.readReg(0x25, 1)    # FILTK
+    device.readReg(0x2A, 1)    # ACCFILT
+    device.readReg(0x2E, 1)    # VERSION
+    device.readReg(0x74, 1)    # MODDELAY
+    device.readReg(0x7F, 6)    # NUMBERID1..6
+
+
+def _fmt_enum(value, table):
+    if value is None:
+        return "-"
+    return table.get(value, "0x{0:04X}".format(value))
+
+
+# Decode the configuration registers into {field_key: display string}.
+def decode_status(device):
     reg = device.registerData
-    data = device.deviceData
+    v = {}
 
-    print("=" * 56)
-    print("HWT9037-485 device status @ {0} ({1} bps)".format(PORT_NAME, baud))
-    print("=" * 56)
-
-    # --- Identity & communication ---
-    print("[Identity & Communication]")
     version = reg.get(0x2E)
-    fmt("Firmware version", "0x{0:04X}".format(version) if version is not None else "-")
-    fmt("Serial number", decode_numberid(device) or "-")
+    v["fw_version"] = "0x{0:04X}".format(version) if version is not None else "-"
+    v["serial_number"] = decode_numberid(device) or "-"
     addr = reg.get(0x1A)
-    fmt("Modbus address", "0x{0:02X}".format(addr & 0xFF) if addr is not None else "-")
+    v["modbus_addr"] = "0x{0:02X}".format(addr & 0xFF) if addr is not None else "-"
     baud = reg.get(0x04)
-    fmt("Baud rate", "{0} (0x{1:02X})".format(BAUD_MAP.get(baud, "unknown"), baud) if baud is not None else "-")
+    v["baud_rate"] = "{0} (0x{1:02X})".format(BAUD_MAP.get(baud, "unknown"), baud) if baud is not None else "-"
     moddelay = reg.get(0x74)
-    fmt("RS485 resp. delay", "{0} us".format(moddelay) if moddelay is not None else "-")
+    v["rs485_delay"] = "{0} us".format(moddelay) if moddelay is not None else "-"
 
-    # --- Operating mode ---
-    print("[Operating Mode]")
-    workmode = reg.get(0x0E)
-    fmt("Work mode", WORKMODE_MAP.get(workmode, "0x{0:04X}".format(workmode)) if workmode is not None else "-")
-    bw = reg.get(0x1F)
-    fmt("Bandwidth", BANDWIDTH_MAP.get(bw, "0x{0:04X}".format(bw)) if bw is not None else "-")
-    gr = reg.get(0x20)
-    fmt("Gyroscope range", GYRORANGE_MAP.get(gr, "0x{0:04X}".format(gr)) if gr is not None else "-")
-    ar = reg.get(0x21)
-    fmt("Acceleration range", ACCRANGE_MAP.get(ar, "0x{0:04X}".format(ar)) if ar is not None else "-")
-    axis6 = reg.get(0x24)
-    fmt("Algorithm", AXIS6_MAP.get(axis6, "0x{0:04X}".format(axis6)) if axis6 is not None else "-")
-    orient = reg.get(0x23)
-    fmt("Installation", ORIENT_MAP.get(orient, "0x{0:04X}".format(orient)) if orient is not None else "-")
-    sleep = reg.get(0x22)
-    fmt("Power state", SLEEP_MAP.get(sleep, "0x{0:04X}".format(sleep)) if sleep is not None else "-")
+    v["work_mode"] = _fmt_enum(reg.get(0x0E), WORKMODE_MAP)
+    v["bandwidth"] = _fmt_enum(reg.get(0x1F), BANDWIDTH_MAP)
+    v["gyro_range"] = _fmt_enum(reg.get(0x20), GYRORANGE_MAP)
+    v["acc_range"] = _fmt_enum(reg.get(0x21), ACCRANGE_MAP)
+    v["algorithm"] = _fmt_enum(reg.get(0x24), AXIS6_MAP)
+    v["installation"] = _fmt_enum(reg.get(0x23), ORIENT_MAP)
+    v["power_state"] = _fmt_enum(reg.get(0x22), SLEEP_MAP)
 
-    # --- Filters ---
-    print("[Filters]")
     filtk = reg.get(0x25)
-    fmt("Dynamic filter (K)", filtk if filtk is not None else "-")
+    v["filter_k"] = str(filtk) if filtk is not None else "-"
     accfilt = reg.get(0x2A)
-    fmt("Acceleration filter", accfilt if accfilt is not None else "-")
-
-    # --- Live measurements ---
-    print("[Live Measurements]")
-    fmt("Acceleration (g)", "X={0}, Y={1}, Z={2}".format(
-        data.get("AccX", "-"), data.get("AccY", "-"), data.get("AccZ", "-")))
-    fmt("Angular vel. (deg/s)", "X={0}, Y={1}, Z={2}".format(
-        data.get("AsX", "-"), data.get("AsY", "-"), data.get("AsZ", "-")))
-    fmt("Magnetic field", "X={0}, Y={1}, Z={2}".format(
-        data.get("HX", "-"), data.get("HY", "-"), data.get("HZ", "-")))
-    fmt("Angle (deg)", "Roll={0}, Pitch={1}, Yaw={2}".format(
-        data.get("AngX", "-"), data.get("AngY", "-"), data.get("AngZ", "-")))
-    fmt("Temperature (C)", data.get("Temp", "-"))
-    fmt("Quaternion", "q0={0}, q1={1}, q2={2}, q3={3}".format(
-        data.get("q0", "-"), data.get("q1", "-"), data.get("q2", "-"), data.get("q3", "-")))
-    print("=" * 56)
+    v["acc_filter"] = str(accfilt) if accfilt is not None else "-"
+    return v
 
 
 # Probe the candidate baud rates and return the device opened at the one that answers.
-def connectAutoBaud():
+def connectAutoBaud(port):
     for baud in CANDIDATE_BAUDS:
-        device = HWT9037_485(PORT_NAME, baud, DEVICE_ADDR, lambda d: None)
+        device = HWT9037_485(port, baud, DEVICE_ADDR, lambda d: None)
         device.openDevice()
         if not device.isOpen:
             continue
@@ -131,36 +147,66 @@ def connectAutoBaud():
     return None, None
 
 
+# Connect, read the configuration registers, and return a structured status dict
+# (or None if the device can't be reached). Opens and closes the serial port, so the
+# port is free again for a measurement afterwards.
+def read_device_status(port=None):
+    port = resolve_port(port)
+    device, baud = connectAutoBaud(port)
+    if device is None:
+        return None
+    try:
+        device.verbose = False
+        read_config_registers(device)
+        return {"port": port, "baud": baud, "values": decode_status(device)}
+    finally:
+        device.closeDevice()
+
+
+def print_live_measurements(device):
+    data = device.deviceData
+    fmt("Acceleration (g)", "X={0}, Y={1}, Z={2}".format(
+        data.get("AccX", "-"), data.get("AccY", "-"), data.get("AccZ", "-")))
+    fmt("Angular vel. (deg/s)", "X={0}, Y={1}, Z={2}".format(
+        data.get("AsX", "-"), data.get("AsY", "-"), data.get("AsZ", "-")))
+    fmt("Magnetic field", "X={0}, Y={1}, Z={2}".format(
+        data.get("HX", "-"), data.get("HY", "-"), data.get("HZ", "-")))
+    fmt("Angle (deg)", "Roll={0}, Pitch={1}, Yaw={2}".format(
+        data.get("AngX", "-"), data.get("AngY", "-"), data.get("AngZ", "-")))
+    fmt("Temperature (C)", data.get("Temp", "-"))
+    fmt("Quaternion", "q0={0}, q1={1}, q2={2}, q3={3}".format(
+        data.get("q0", "-"), data.get("q1", "-"), data.get("q2", "-"), data.get("q3", "-")))
+
+
 def main():
-    global PORT_NAME
     parser = argparse.ArgumentParser(description="Read and decode HWT9037-485 device status.")
     add_port_argument(parser)
     args = parser.parse_args()
-    PORT_NAME = resolve_port(args.port)
+    port = resolve_port(args.port)
 
-    device, baud = connectAutoBaud()
+    device, baud = connectAutoBaud(port)
     if device is None:
-        print("Could not reach the device on {0} at any candidate baud rate".format(PORT_NAME))
+        print("Could not reach the device on {0} at any candidate baud rate".format(port))
         return
 
     try:
-        # Configuration registers (read in a few contiguous blocks).
-        device.readReg(0x04, 1)    # BAUD
-        device.readReg(0x0E, 1)    # WORKMODE
-        device.readReg(0x1A, 1)    # IICADDR
-        device.readReg(0x1F, 6)    # BANDWIDTH..AXIS6 (0x1F~0x24)
-        device.readReg(0x25, 1)    # FILTK
-        device.readReg(0x2A, 1)    # ACCFILT
-        device.readReg(0x2E, 1)    # VERSION
-        device.readReg(0x74, 1)    # MODDELAY
-        device.readReg(0x7F, 6)    # NUMBERID1..6
-
+        read_config_registers(device)
         # Live measurement blocks (these also decode into deviceData).
         device.readReg(0x34, 15)   # Acc + Gyro + Mag + Angle
         device.readReg(0x43, 1)    # Temperature
         device.readReg(0x51, 4)    # Quaternion
 
-        printStatus(device, baud)
+        values = decode_status(device)
+        print("=" * 56)
+        print("HWT9037-485 device status @ {0} ({1} bps)".format(port, baud))
+        print("=" * 56)
+        for _gkey, gtitle, fields in STATUS_LAYOUT:
+            print("[{0}]".format(gtitle))
+            for fkey, flabel in fields:
+                fmt(flabel, values.get(fkey, "-"))
+        print("[Live Measurements]")
+        print_live_measurements(device)
+        print("=" * 56)
     finally:
         device.closeDevice()
 
