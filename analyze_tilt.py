@@ -13,7 +13,7 @@ import sys
 # Requirement targets for this project.
 ANGLE_REQ_DEG = 0.01     # required tilt accuracy
 SLOPE_THRESH_PCT = 0.1   # alarm threshold (1/1000 = 0.1%)
-FILTER_SECONDS = 0.5     # short median/average window for the alarm path
+FILTER_SECONDS = 1.0     # moving-average window for the tilt-peak (uprightness) metric
 
 
 def _stats(x):
@@ -108,8 +108,9 @@ def analyze(csv_path):
     # Plain-language assessment against the project targets.
     _, roll_sd, _, _, _ = _stats(roll)
     _, pitch_sd, _, _, _ = _stats(pitch)
-    slope_med = _moving(slope, w, True)
-    _, _, _, _, slope_med_pp = _stats(slope_med)
+    # Uprightness metric: peak of the 1 s moving average of the resultant slope.
+    slope_ma = _moving(slope, w, False)
+    ma_peak = max(slope_ma)
     L.append("Assessment (targets: {0} deg accuracy, {1}% alarm)".format(
         ANGLE_REQ_DEG, SLOPE_THRESH_PCT))
     L.append("-" * 60)
@@ -117,9 +118,10 @@ def analyze(csv_path):
         roll_sd, "PASS" if 3 * roll_sd <= ANGLE_REQ_DEG else "CHECK (3-sigma > req)", ANGLE_REQ_DEG))
     L.append("Pitch noise std = {0:.4f} deg  -> {1} (req <= {2})".format(
         pitch_sd, "PASS" if 3 * pitch_sd <= ANGLE_REQ_DEG else "CHECK (3-sigma > req)", ANGLE_REQ_DEG))
-    L.append("slope raw pk-pk        = {0:.4f} %".format(_stats(slope)[4]))
-    L.append("slope median pk-pk     = {0:.4f} %  (vs {1}% threshold)".format(
-        slope_med_pp, SLOPE_THRESH_PCT))
+    L.append("slope raw max            = {0:.4f} %".format(max(slope)))
+    L.append("slope {0:.0f}s-avg peak (max)  = {1:.4f} %  -> {2} (vs {3}% threshold)".format(
+        FILTER_SECONDS, ma_peak,
+        "OVER" if ma_peak > SLOPE_THRESH_PCT else "under", SLOPE_THRESH_PCT))
     L.append("")
     return "\n".join(L)
 

@@ -70,6 +70,15 @@ def csv_rows(path):
         return 0
 
 
+def moving_average(x, w):
+    # Causal trailing average: each point is the mean of the previous w samples.
+    x = np.asarray(x, dtype=float)
+    if w <= 1 or len(x) < w:
+        return x
+    c = np.cumsum(np.insert(x, 0, 0.0))
+    return (c[w:] - c[:-w]) / w
+
+
 @st.cache_data
 def read_csv(path, _mtime):
     # _mtime busts the cache when the file changes.
@@ -94,16 +103,18 @@ if b_stop.button("Stop", disabled=not logger_running(), use_container_width=True
 
 @st.fragment(run_every=2)
 def measurement_status():
+    # Rendered inside a `with st.sidebar` block, so use plain st.* here.
     if logger_running():
         active = newest_active_csv()
-        st.sidebar.info("Measuring... {0} samples".format(csv_rows(active) if active else 0))
+        st.info("Measuring... {0} samples".format(csv_rows(active) if active else 0))
     elif st.session_state.get("was_running"):
         # Just finished: full refresh so the new file appears in the list below.
         st.session_state["was_running"] = False
         st.rerun()
 
 
-measurement_status()
+with st.sidebar:
+    measurement_status()
 
 with st.sidebar.expander("Logger output"):
     try:
@@ -148,6 +159,12 @@ n = len(df)
 dur = float(t[-1] - t[0]) if n > 1 else 0.0
 fs = (n - 1) / dur if dur > 0 else 25.0
 
+# --- 1-second moving average; its max is the tilt-magnitude (uprightness) metric ---
+MA_SECONDS = 1.0
+ma_win = max(1, int(round(MA_SECONDS * fs)))
+slope_ma = moving_average(slope, ma_win)
+slope_peak = float(np.nanmax(slope_ma)) if len(slope_ma) else float("nan")
+
 # --- Summary metrics ---
 cols = st.columns(6)
 cols[0].metric("samples", n)
@@ -155,14 +172,14 @@ cols[1].metric("rate (Hz)", "{0:.1f}".format(fs))
 cols[2].metric("Roll sigma (deg)", "{0:.4f}".format(np.nanstd(roll)))
 cols[3].metric("Pitch sigma (deg)", "{0:.4f}".format(np.nanstd(pitch)))
 cols[4].metric("slope mean (%)", "{0:.4f}".format(np.nanmean(slope)))
-cols[5].metric("slope max (%)", "{0:.4f}".format(np.nanmax(slope)))
+cols[5].metric("slope peak 1s-avg (%)", "{0:.4f}".format(slope_peak))
 
-over = np.count_nonzero(slope > SLOPE_THRESHOLD_PCT)
-if over:
-    st.warning("slope exceeded {0}% in {1} of {2} samples ({3:.1f}%)".format(
-        SLOPE_THRESHOLD_PCT, over, n, 100.0 * over / n))
+if slope_peak > SLOPE_THRESHOLD_PCT:
+    st.warning("1s-average slope peak {0:.4f}% exceeded the {1}% threshold".format(
+        slope_peak, SLOPE_THRESHOLD_PCT))
 else:
-    st.success("slope stayed below the {0}% threshold for the whole record".format(SLOPE_THRESHOLD_PCT))
+    st.success("1s-average slope peak {0:.4f}% stayed below the {1}% threshold".format(
+        slope_peak, SLOPE_THRESHOLD_PCT))
 
 # --- Time series (angles + slope on a secondary axis) ---
 ts = make_subplots(specs=[[{"secondary_y": True}]])
@@ -170,6 +187,9 @@ ts.add_trace(go.Scatter(x=t, y=roll, name="Roll", line=dict(width=1)), secondary
 ts.add_trace(go.Scatter(x=t, y=pitch, name="Pitch", line=dict(width=1)), secondary_y=False)
 ts.add_trace(go.Scatter(x=t, y=slope, name="slope %", line=dict(width=1, color="crimson")),
              secondary_y=True)
+if len(slope_ma):
+    ts.add_trace(go.Scatter(x=t[ma_win - 1:], y=slope_ma, name="slope 1s-avg",
+                            line=dict(width=2, color="darkred")), secondary_y=True)
 ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
              secondary_y=True, annotation_text="{0}%".format(SLOPE_THRESHOLD_PCT))
 ts.update_xaxes(title_text="elapsed (s)")
