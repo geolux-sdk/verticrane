@@ -1,136 +1,139 @@
-from hwt9037_485 import HWT9037_485
-from port_config import add_port_argument, resolve_port
+# coding:UTF-8
+# Self-test: exercise the building blocks the dashboard relies on and report
+# pass/fail for each, so a fresh install (e.g. on the Raspberry Pi) can be verified.
+#
+#   python test.py                  # run all checks (sensor must be connected)
+#   python test.py --port /dev/ttyUSB0
+#   python test.py --no-hardware    # software-only checks (no sensor needed)
+#
+# Checks: port resolution (port_config), settings (app_config), CSV analysis
+# (analyze_tilt), logger module import (log_tilt), and the device link + a few
+# live samples (read_status / the measurement path). The sensor is required for
+# the last one unless --no-hardware is given.
+
 import argparse
+import math
+import os
+import sys
+import tempfile
 import time
 
+import analyze_tilt
+import app_config
+import read_status
+from port_config import add_port_argument, resolve_port
 
-REGISTER_DUMP_RANGES = [
-    (0x00, 0x2B),
-    (0x2E, 0x01),
-    (0x30, 0x14),
-    (0x51, 0x04),
-    (0x61, 0x01),
-    (0x63, 0x01),
-    (0x69, 0x02),
-    (0x6E, 0x02),
-    (0x74, 0x01),
-    (0x7F, 0x06),
-    (0x95, 0x04),
-]
+# Touchstone columns written by log_tilt.py (used by the synthetic analysis check).
+CSV_COLUMNS = ("timestamp,elapsed_s,Roll_deg,Pitch_deg,Yaw_deg,slope_pct,"
+               "AccX_g,AccY_g,AccZ_g,GyroX_dps,GyroY_dps,GyroZ_dps,Temp_C")
+
+_results = []
 
 
-# Resolved from --port / VERTICRANE_PORT / auto-detect in __main__.
-PORT_NAME = None
-DEVICE_ADDR = 0x50
-DEFAULT_BAUD = 9600
-SESSION_BAUD = 115200
-DUMP_REGISTERS_ON_START = True
-
-
-# Called when device data is updated.
-def updateData(device):
-    data = device.deviceData
-    print(
-        "Acc: X={AccX}, Y={AccY}, Z={AccZ} | "
-        "Gyro: X={AsX}, Y={AsY}, Z={AsZ} | "
-        "Mag: X={HX}, Y={HY}, Z={HZ} | "
-        "Angle: X={AngX}, Y={AngY}, Z={AngZ} | "
-        "Temp: {Temp} C | "
-        "Quat: q0={q0}, q1={q1}, q2={q2}, q3={q3}".format(
-            AccX=data.get("AccX", "-"),
-            AccY=data.get("AccY", "-"),
-            AccZ=data.get("AccZ", "-"),
-            AsX=data.get("AsX", "-"),
-            AsY=data.get("AsY", "-"),
-            AsZ=data.get("AsZ", "-"),
-            HX=data.get("HX", "-"),
-            HY=data.get("HY", "-"),
-            HZ=data.get("HZ", "-"),
-            AngX=data.get("AngX", "-"),
-            AngY=data.get("AngY", "-"),
-            AngZ=data.get("AngZ", "-"),
-            Temp=data.get("Temp", "-"),
-            q0=data.get("q0", "-"),
-            q1=data.get("q1", "-"),
-            q2=data.get("q2", "-"),
-            q3=data.get("q3", "-"),
-        )
-    )
-
-
-def dumpRegisters(device):
-    print("Register dump started")
-    for start, count in REGISTER_DUMP_RANGES:
-        print("Read registers: start=0x{0:04X}, count={1}".format(start, count))
-        device.readReg(start, count)
-        time.sleep(0.2)
-        for reg in range(start, start + count):
-            value = device.registerData.get(reg)
-            if value is not None:
-                signed_value = value - 0x10000 if value & 0x8000 else value
-                print("REG 0x{0:04X} = 0x{1:04X} ({2})".format(reg, value, signed_value))
-    print("Register dump finished")
-
-
-def createDevice(baud):
-    return HWT9037_485(PORT_NAME, baud, DEVICE_ADDR, updateData)
-
-
-def setSessionBaudrate(baud=SESSION_BAUD):
+def check(name, fn):
     try:
-        print("Changing baudrate from 9600 to {0} bps with saving".format(baud))
+        ok, detail = fn()
+    except Exception as ex:  # a check should never crash the whole run
+        ok, detail = False, "예외: {0}".format(ex)
+    _results.append(ok)
+    print("[{0}] {1} - {2}".format("PASS" if ok else "FAIL", name, detail))
+
+
+def resultant_slope_pct(roll_deg, pitch_deg):
+    # Same formula log_tilt.py records; the measurement path depends on it.
+    sx = math.tan(math.radians(roll_deg))
+    sy = math.tan(math.radians(pitch_deg))
+    return math.hypot(sx, sy) * 100.0
+
+
+def check_config():
+    cfg = app_config.load()
+    ok = "slope_threshold_pct" in cfg and "ma_seconds" in cfg
+    return ok, "임계값 {0}% · 이동평균 {1}s".format(
+        cfg.get("slope_threshold_pct"), cfg.get("ma_seconds"))
+
+
+def check_analyze():
+    # Write a small synthetic log and confirm analyze() returns a real report.
+    path = os.path.join(tempfile.gettempdir(), "verticrane_selftest.csv")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(CSV_COLUMNS + "\n")
+        for i in range(50):
+            f.write("2026-01-01 00:00:00,{0:.2f},0.30,-0.20,10.0,0.50,"
+                    "0.0,0.0,1.0,0,0,0,25.0\n".format(i * 0.04))
+    report = analyze_tilt.analyze(path)
+    os.remove(path)
+    ok = "샘플 수" in report and "찾을 수 없습니다" not in report
+    return ok, "리포트 {0}자 생성".format(len(report))
+
+
+def check_logger_module():
+    # The dashboard launches log_tilt.py as a subprocess; confirm it imports
+    # (which also loads hwt9037_485, port_config, analyze_tilt).
+    import log_tilt
+    ok = hasattr(log_tilt, "resultant_slope_pct") and hasattr(log_tilt, "main")
+    return ok, "log_tilt 및 의존 모듈 로드 OK"
+
+
+def check_hardware(port):
+    # One connection: decode the config (read_status) and read a few live samples
+    # (the measurement path), so this verifies both with a single auto-baud probe.
+    device, baud = read_status.connectAutoBaud(port)
+    if device is None:
+        return False, "장치 무응답 ({0})".format(port)
+    try:
+        device.verbose = False
+        read_status.read_config_registers(device)
+        vals = read_status.decode_status(device)
+
+        good = 0
+        last_slope = None
+        for _ in range(10):
+            device.readReg(0x34, 15)
+            roll = device.deviceData.get("AngX")
+            pitch = device.deviceData.get("AngY")
+            if roll is not None and pitch is not None:
+                good += 1
+                last_slope = resultant_slope_pct(roll, pitch)
+            time.sleep(0.05)
+
+        ok = good >= 5 and vals.get("fw_version") not in (None, "-")
+        detail = "{0} bps · fw {1} · {2} · 라이브 {3}/10 · slope {4}".format(
+            baud, vals.get("fw_version"), vals.get("algorithm"), good,
+            "{0:.4f}%".format(last_slope) if last_slope is not None else "-")
+        return ok, detail
+    finally:
         device.closeDevice()
 
-        device.setBaudrate(baud=DEFAULT_BAUD)
-        device.openDevice()
-        device.readReg(0x2E, 1)
-        time.sleep(0.2)
-        version = device.registerData.get(0x2E)
-        if version is None:
-            print("{0} bps change check failed".format(SESSION_BAUD))
-        else:
-            print("{0} bps change check succeeded: VERSION=0x{1:04X}".format(SESSION_BAUD, version))
-            device.writeReg(0x04, 0x0006, save=True)  # 0x0006 corresponds to 115200 bps
-            device.closeDevice()
-        device.setBaudrate(baud=baud)
-        device.openDevice()
 
-    except Exception as ex:
-        print("Error changing baudrate: {}".format(ex))
-        
+def main():
+    parser = argparse.ArgumentParser(
+        description="Verify the building blocks the dashboard relies on.")
+    add_port_argument(parser)
+    parser.add_argument("--no-hardware", action="store_true",
+                        help="Skip checks that need the sensor connected.")
+    args = parser.parse_args()
+    port = resolve_port(args.port)
 
+    print("=" * 56)
+    print("Verticrane 대시보드 기능 자가 점검")
+    print("=" * 56)
 
+    check("포트 결정 (port_config)", lambda: (bool(port), "port = {0}".format(port)))
+    check("설정 로드 (app_config)", check_config)
+    check("CSV 분석 (analyze_tilt)", check_analyze)
+    check("로거 모듈 (log_tilt)", check_logger_module)
+    if args.no_hardware:
+        print("[SKIP] 센서 통신 + 라이브 (--no-hardware)")
+    else:
+        check("센서 통신 + 라이브 (read_status)", lambda: check_hardware(port))
 
+    passed = sum(1 for ok in _results if ok)
+    total = len(_results)
+    print("-" * 56)
+    print("{0}/{1} 통과".format(passed, total))
+    return 0 if passed == total else 1
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="HWT9037-485 loop-read test entrypoint.")
-    add_port_argument(parser)
-    args = parser.parse_args()
-    PORT_NAME = resolve_port(args.port)
-
-    try:
-        device = createDevice(SESSION_BAUD)
-        device.openDevice()
-        device.readReg(0x2E, 1)
-        version = device.registerData.get(0x2E)
-        if version is None:
-            print("{0} bps communication check failed".format(SESSION_BAUD))
-            setSessionBaudrate(baud=SESSION_BAUD)
-        else:
-            print("{0} bps communication OK: VERSION=0x{1:04X}".format(SESSION_BAUD, version))
-        
-        if DUMP_REGISTERS_ON_START:
-            dumpRegisters(device)
-            
-        # Enable loop reading.
-        device.startLoopRead()
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Stopping...")
-    finally:
-        device.stopLoopRead()
-        time.sleep(0.3)
-        device.closeDevice()
-        print("Stopped")
+    sys.exit(main())
