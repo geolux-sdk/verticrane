@@ -26,8 +26,8 @@ OUTPUT_DIR = "data"
 # Resolved from --port / VERTICRANE_PORT / auto-detect in main().
 PORT_NAME = None
 DEVICE_ADDR = 0x50
-# The device powers on at 9600 bps but may be saved to 115200; probe both.
-CANDIDATE_BAUDS = [9600, 115200]
+# Operational baud is 115200 (set via configure_sensor.py); 9600 is the factory fallback.
+CANDIDATE_BAUDS = [115200, 9600]
 
 # Sensor bandwidth is 10 Hz; sample above 2x that (Nyquist) plus a guard band.
 SAMPLE_RATE_HZ = 25.0

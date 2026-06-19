@@ -11,9 +11,9 @@ from port_config import add_port_argument, resolve_port
 
 
 DEVICE_ADDR = 0x50
-# The device powers on at 9600 bps (factory default) but can be switched and saved to a
-# higher rate. Probe the likely rates and use whichever one answers.
-CANDIDATE_BAUDS = [9600, 115200]
+# Operational baud is 115200 (set and saved via configure_sensor.py), so try it first.
+# 9600 is the factory default, kept as a fallback for an unconfigured unit.
+CANDIDATE_BAUDS = [115200, 9600]
 
 
 # region Decode tables (from the Modbus protocol document)

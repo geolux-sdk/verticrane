@@ -22,7 +22,8 @@ from port_config import add_port_argument, resolve_port
 # Resolved from --port / VERTICRANE_PORT / auto-detect in main().
 PORT_NAME = None
 DEVICE_ADDR = 0x50
-CANDIDATE_BAUDS = [9600, 115200]
+# Operational baud is 115200; 9600 is the factory fallback (for first-time setup).
+CANDIDATE_BAUDS = [115200, 9600]
 
 AXIS6_MAP = {0: "9-axis (mag absolute heading)", 1: "6-axis (gyro relative heading)"}
 ORIENT_MAP = {0: "horizontal (Z up)", 1: "vertical (Y up)"}
