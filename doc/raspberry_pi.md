@@ -95,3 +95,13 @@ python log_tilt.py 10
 ```bash
 .venv/bin/python -m streamlit run dashboard.py --server.address 0.0.0.0
 ```
+
+## 5. 최신 코드로 업데이트
+
+```bash
+cd ~/verticrane
+./update.sh          # git pull; requirements.txt가 바뀌면 의존성 자동 재설치
+./update.sh --deps   # pull 후 의존성을 무조건 재설치
+```
+
+`update.sh`는 `git pull --ff-only`로 당겨오며, **`sudo` 없이** 실행합니다.
