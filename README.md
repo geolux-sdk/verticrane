@@ -2,7 +2,7 @@
 
 WitMotion **HWT9037-485** 9축 IMU(기울기 센서)를 Modbus RTU / RS-485로 읽어
 기울기를 측정·기록·분석하고, 웹 대시보드로 보여주는 도구 모음입니다.
-Windows와 라즈베리파이(Linux)에서 동일하게 동작합니다.
+**Windows**(개발)와 **라즈베리파이**(현장 배포)에서 동일하게 동작합니다.
 
 ## 하드웨어
 
@@ -27,112 +27,150 @@ Windows와 라즈베리파이(Linux)에서 동일하게 동작합니다.
 | `test.py` | 대시보드 기능 자가 점검 |
 
 > CLI 도구 중 **수동 실행**은 `configure_sensor.py`(설정)와 `test.py`(점검)이고,
-> `read_status.py`/`analyze_tilt.py`/`log_tilt.py`는 대시보드가 사용/실행합니다.
+> 나머지는 대시보드가 사용/실행합니다.
 
 ---
 
-## 설치
+# 소스 받기 (git)
 
-### 라즈베리파이 / Linux (가상환경)
+저장소: `https://github.com/geolux-sdk/verticrane.git`
 
-최근 라즈베리파이 OS는 시스템 파이썬에 직접 설치를 막으므로(PEP 668),
-설치 스크립트가 가상환경 `.venv`를 만들고 거기에 설치합니다. **`sudo` 없이** 실행하세요.
-
+### 라즈베리파이 / Linux
 ```bash
-cd ~/verticrane
-chmod +x *.sh                    # 실행 권한 (최초 1회)
-./install_requirements.sh        # .venv 생성 + 의존성 설치
-
-sudo usermod -aG dialout $USER   # 시리얼 권한 → 재로그인 필요 (최초 1회)
+sudo apt update && sudo apt install -y git    # git 없으면
+cd ~
+git clone https://github.com/geolux-sdk/verticrane.git
+cd verticrane
 ```
-
-이후 **모든 CLI 도구는 venv 파이썬으로 실행**합니다:
-
-```bash
-.venv/bin/python <스크립트>
-# 또는
-source .venv/bin/activate        # 활성화하면 그냥 python 으로 실행 가능
-python <스크립트>
-```
-
-자세한 라즈베리파이 안내: [doc/raspberry_pi.md](doc/raspberry_pi.md)
+최신 코드 받기(이미 클론한 경우): `./update.sh` (git pull + 필요 시 의존성 재설치)
 
 ### Windows
-
+[Git for Windows](https://git-scm.com/download/win) 설치 후, 터미널(또는 Git Bash)에서:
 ```bat
-install_requirements.bat
-python <스크립트>
+git clone https://github.com/geolux-sdk/verticrane.git
+cd verticrane
 ```
+최신 코드 받기: `git pull`
+
+> 비공개 저장소라면 클론 시 GitHub **사용자명 + Personal Access Token**(비밀번호 자리에 토큰)을
+> 입력해야 합니다. 토큰은 GitHub → Settings → Developer settings → Personal access tokens에서 발급.
 
 ---
 
-## 센서 설정 (최초 1회)
+# Windows (개발용)
 
-기울기 측정용 6축 알고리즘으로 설정하고, 필요하면 통신 속도를 115200으로 맞춥니다.
-공장 초기(9600) 센서도 자동으로 찾아 변경·저장합니다.
+시스템 파이썬을 그대로 사용합니다.
 
-```bash
-# Linux/Pi
-.venv/bin/python configure_sensor.py --baud 115200
-# Windows
+### 1. 설치
+```bat
+install_requirements.bat
+```
+
+### 2. 센서 설정 (최초 1회)
+6축 알고리즘 + 통신 속도 115200으로 설정·저장 (공장 9600 센서도 자동으로 찾음):
+```bat
 python configure_sensor.py --baud 115200
 ```
 
-`--baud` 없이 실행하면 6축 설정만 적용합니다.
+### 3. 자가 점검
+```bat
+python test.py                 :: 전체 (센서 필요), 라이브 1초
+python test.py --seconds 10    :: 라이브 측정 10초
+python test.py --no-hardware   :: 소프트웨어만 (센서 없이)
+```
+
+### 4. 대시보드 실행
+```bat
+run_dashboard.bat
+```
+브라우저: `http://localhost:8501`
+
+### 기울기 로그 (선택)
+```bat
+python log_tilt.py 10          :: 10분간 기록 → data\*.csv + *.txt
+```
+
+> Windows 기본 포트는 `COM11`입니다. 다르면 `--port COM3`처럼 지정하세요.
 
 ---
 
-## 실행
+# 라즈베리파이 (현장 배포)
 
-### 대시보드
+PEP 668 때문에 시스템 파이썬에 직접 설치할 수 없으므로 **가상환경 `.venv`** 를 사용합니다.
+설치/업데이트 스크립트가 `.venv`를 자동으로 만들고 사용합니다. **`sudo` 없이** 실행하세요.
 
+### 1. 설치 (최초 1회)
 ```bash
-# 라즈베리파이 / Linux
-./run_dashboard.sh
+cd ~/verticrane
+chmod +x *.sh                    # 실행 권한
+./install_requirements.sh        # .venv 생성 + 의존성 설치 (sudo 없이!)
 
-# Windows
-run_dashboard.bat
+sudo usermod -aG dialout $USER   # 시리얼 권한 → 재로그인/재부팅 필요
 ```
 
-브라우저에서 접속:
-- 같은 PC: `http://localhost:8501`
-- 같은 네트워크의 다른 기기: `http://<기기IP>:8501`
-
-`run_dashboard.sh`는 `.venv`가 있으면 자동으로 그 파이썬을 사용합니다.
-
-### 자가 점검 (test.py)
-
-대시보드가 쓰는 전 기능(포트·설정·분석·로거·센서통신/라이브)을 한 번에 점검합니다.
-`test.sh`는 자동으로 `.venv` 파이썬을 사용하고 인자를 그대로 전달합니다.
-
+### 2. 센서 설정 (최초 1회)
 ```bash
-# 라즈베리파이 / Linux (venv 자동)
+.venv/bin/python configure_sensor.py --baud 115200
+```
+
+### 3. 자가 점검
+`test.sh`는 자동으로 `.venv` 파이썬을 사용합니다.
+```bash
 ./test.sh                    # 전체 (센서 필요), 라이브 1초
 ./test.sh --seconds 10       # 라이브 측정 10초
 ./test.sh --no-hardware      # 소프트웨어만 (센서 없이)
-./test.sh --port /dev/ttyUSB0
-
-# 직접 호출도 가능
-.venv/bin/python test.py --seconds 10
-
-# Windows
-python test.py
 ```
+`N/N 통과`가 나오면 정상입니다.
 
-`N/N 통과`가 나오면 정상입니다. (종료코드 0=성공, 1=실패)
-
-### 기울기 로그 (CLI)
-
+### 4. 대시보드 실행
 ```bash
-.venv/bin/python log_tilt.py 10          # 10분간 25Hz로 기록 → data/*.csv + *.txt
+./run_dashboard.sh           # .venv를 자동으로 사용
 ```
+브라우저: `http://<파이IP>:8501` (같은 네트워크의 PC/폰에서 접속 가능)
+
+### 5. 상시 가동 (systemd)
+전원만 켜면 자동 시작되고, 죽으면 자동 재시작됩니다.
+```bash
+sudo cp ~/verticrane/verticrane-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now verticrane-dashboard
+```
+관리:
+```bash
+systemctl status verticrane-dashboard         # 상태
+journalctl -u verticrane-dashboard -f         # 로그
+sudo systemctl restart verticrane-dashboard   # 재시작 (코드 업데이트 후)
+sudo systemctl stop verticrane-dashboard      # 중지
+```
+> 서비스로 띄운 뒤엔 `./run_dashboard.sh`를 따로 실행하지 마세요(포트 8501 충돌).
+
+### 6. 업데이트
+```bash
+./update.sh                                   # git pull + 필요 시 의존성 재설치
+sudo systemctl restart verticrane-dashboard   # systemd 가동 중이면 재시작
+```
+
+### CLI 도구 실행 규칙 (중요)
+라즈베리파이에서 CLI 도구는 **반드시 venv 파이썬**으로 실행합니다.
+시스템 `python`으로 실행하면 `ModuleNotFoundError: pymodbus`가 납니다.
+```bash
+.venv/bin/python <스크립트>          # 예: .venv/bin/python read_status.py
+# 또는 활성화 후
+source .venv/bin/activate
+python <스크립트>
+```
+대시보드(`run_dashboard.sh`)와 systemd 서비스는 **자동으로 venv**를 쓰므로 활성화가 필요 없습니다.
+
+자세한 라즈베리파이 안내: [doc/raspberry_pi.md](doc/raspberry_pi.md)
 
 ---
+
+# 공통
 
 ## 관리자 설정 (`/setup`)
 
 기울기 경보 **임계값**과 **이동평균 윈도우**(판단 기준)는 숨겨진 관리자 페이지에서
-바꿉니다. 사이드바에 링크가 없으며 URL로만 접근합니다.
+바꿉니다. 사이드바에 링크가 없고 URL로만 접근합니다.
 
 1. `http://<기기IP>:8501/setup` 접속
 2. **PINCODE** 입력 (초기값 `01023538099`)
@@ -145,47 +183,6 @@ python test.py
 > 보안 수준: URL 은닉 + PIN의 가벼운 보호입니다. 외부 노출이 필요하면
 > VPN 또는 리버스 프록시(HTTPS+인증)를 거치세요.
 
----
-
-## 상시 가동 (systemd, 라즈베리파이)
-
-전원만 켜면 자동 시작되고, 죽으면 자동 재시작됩니다.
-
-```bash
-sudo cp ~/verticrane/verticrane-dashboard.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now verticrane-dashboard
-```
-
-관리:
-
-```bash
-systemctl status verticrane-dashboard         # 상태
-journalctl -u verticrane-dashboard -f         # 로그
-sudo systemctl restart verticrane-dashboard   # 재시작 (코드 업데이트 후)
-sudo systemctl stop verticrane-dashboard      # 중지
-```
-
-서비스는 `.venv/bin/python`을 직접 실행하므로 venv 활성화가 필요 없습니다.
-**서비스로 띄운 뒤엔 `./run_dashboard.sh`를 따로 실행하지 마세요**(포트 8501 충돌).
-
----
-
-## 업데이트
-
-```bash
-cd ~/verticrane
-./update.sh          # git pull; requirements.txt가 바뀌면 의존성 자동 재설치
-```
-
-systemd로 가동 중이면 업데이트 후 재시작:
-
-```bash
-sudo systemctl restart verticrane-dashboard
-```
-
----
-
 ## 포트 지정
 
 모든 도구는 다음 순서로 시리얼 포트를 결정합니다:
@@ -197,14 +194,11 @@ sudo systemctl restart verticrane-dashboard
 
 어댑터가 여러 개면 `/dev/serial/by-id/...` 경로를 `--port`에 지정하는 것이 안정적입니다.
 
----
-
 ## 문제 해결
 
-- **`ModuleNotFoundError: No module named 'pymodbus'`** — 시스템 `python`으로 실행한 경우입니다.
-  `.venv/bin/python <스크립트>`로 실행하거나 `source .venv/bin/activate` 후 실행하세요.
-- **`No response at 9600 bps` 메시지** — 정상입니다(115200 우선 탐색). 현재는 115200을 먼저
-  시도하므로 보통 바로 연결됩니다.
-- **센서 연결 실패** — `dialout` 그룹 추가 후 재로그인했는지, USB 어댑터가 꽂혀 있는지,
-  다른 프로그램(다른 대시보드/측정)이 포트를 점유하고 있지 않은지 확인하세요.
-- **종합 점검** — `.venv/bin/python test.py`로 어느 단계에서 막히는지 확인하세요.
+- **`ModuleNotFoundError: No module named 'pymodbus'`** (라즈베리파이) — 시스템 `python`으로
+  실행한 경우입니다. `.venv/bin/python <스크립트>` 또는 `source .venv/bin/activate` 후 실행하세요.
+- **`No response at 9600 bps` 메시지** — 정상입니다. 115200을 먼저 시도하므로 보통 바로 연결됩니다.
+- **센서 연결 실패** — (Pi) `dialout` 그룹 추가 후 재로그인했는지, USB 어댑터가 꽂혀 있는지,
+  다른 프로그램이 포트를 점유하고 있지 않은지 확인하세요.
+- **종합 점검** — Windows `python test.py`, 라즈베리파이 `./test.sh`로 어느 단계에서 막히는지 확인하세요.
