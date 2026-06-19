@@ -250,6 +250,10 @@ if len(tilt_ma):
     # in the normal case, or the full series when the log is shorter than ma_win.
     ts.add_trace(go.Scatter(x=t[-len(tilt_ma):], y=tilt_ma, name="기울기 1초평균",
                             line=dict(width=2, color="darkred")), secondary_y=False)
+# Invisible anchor on the right axis so its % ticks and the 0.1% line render
+# (tilt and slope are the same curve, so no separate visible line is drawn).
+ts.add_trace(go.Scatter(x=t, y=slope, showlegend=False, hoverinfo="skip",
+                        line=dict(width=0)), secondary_y=True)
 ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
              secondary_y=True, annotation_text="{0}%".format(SLOPE_THRESHOLD_PCT))
 ts.update_xaxes(title_text="경과 시간 (s)")
