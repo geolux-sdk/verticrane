@@ -251,7 +251,7 @@ if len(slope_ma):
 ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
              secondary_y=True, annotation_text="{0}%".format(SLOPE_THRESHOLD_PCT))
 ts.update_xaxes(title_text="경과 시간 (s)")
-ts.update_yaxes(title_text="각도 (deg)", secondary_y=False)
+ts.update_yaxes(title_text="각도 (deg)", range=[0, 2], secondary_y=False)
 ts.update_yaxes(title_text="기울기 (%)", secondary_y=True)
 ts.update_layout(height=420, margin=dict(t=30, b=10), legend=dict(orientation="h"))
 st.subheader("시계열")
