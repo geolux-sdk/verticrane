@@ -25,7 +25,7 @@ Raspberry Pi setup (USB-RS485 adapter, `dialout` permissions, port selection).
 - Do not commit generated Python cache files such as `__pycache__/` or `*.pyc`.
 - Keep changes focused on the requested behavior.
 - Before changing serial protocol logic, inspect the surrounding packet format and CRC handling.
-- Before pushing to GitHub, show the branch, remote, commit summary, and wait for explicit push approval.
+- Push to GitHub automatically after committing (the user gave standing push approval); still show the branch, remote, and commit summary.
 
 ## Validation
 
