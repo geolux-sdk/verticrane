@@ -1,3 +1,10 @@
 # Hide the multipage navigation so the /setup admin page is reachable only by URL.
 [client]
 showSidebarNavigation = false
+
+# Run headless (no first-run email prompt) and don't collect usage stats.
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

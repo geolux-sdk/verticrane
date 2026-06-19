@@ -110,3 +110,29 @@ cd ~/verticrane
 ```
 
 `update.sh`는 `git pull --ff-only`로 당겨오며, **`sudo` 없이** 실행합니다.
+
+## 6. 부팅 시 자동 시작 (systemd)
+
+상시 가동(전원만 켜면 자동 실행, 크래시 시 자동 재시작)하려면 systemd 서비스로
+등록합니다. 서비스 파일은 사용자 `pi`, 경로 `/home/pi/verticrane` 기준입니다 —
+다르면 `verticrane-dashboard.service`의 `User=`와 경로를 수정하세요.
+
+```bash
+sudo cp ~/verticrane/verticrane-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now verticrane-dashboard   # 지금 시작 + 부팅 시 자동 시작
+```
+
+관리 명령:
+
+```bash
+systemctl status verticrane-dashboard       # 상태 확인
+journalctl -u verticrane-dashboard -f       # 로그 실시간 보기
+sudo systemctl restart verticrane-dashboard # 재시작 (예: 코드 업데이트 후)
+sudo systemctl stop verticrane-dashboard    # 중지
+sudo systemctl disable verticrane-dashboard # 자동 시작 해제
+```
+
+> 코드 업데이트(`./update.sh`) 후에는 `sudo systemctl restart verticrane-dashboard`로
+> 새 코드를 반영하세요. 서비스로 띄우면 `./run_dashboard.sh`는 따로 실행하지 마세요
+> (포트 8501 충돌).
