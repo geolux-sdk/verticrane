@@ -87,26 +87,24 @@ def newest_active_csv():
     return new[-1] if new else None
 
 
-def render_device_status():
-    # Shown only after the user has clicked the status button at least once.
-    if "device_status" not in st.session_state:
+@st.dialog("센서 상태 정보", width="large")
+def device_status_dialog():
+    # Modal popup; opened by calling this function after a status read.
+    status = st.session_state.get("device_status")
+    if status is None:
+        st.error("센서에 연결하지 못했습니다. 포트 연결과 전원을 확인하고, "
+                 "측정 중이라면 정지한 뒤 다시 시도하세요.")
         return
-    status = st.session_state["device_status"]
-    with st.expander("센서 상태 정보", expanded=True):
-        if status is None:
-            st.error("센서에 연결하지 못했습니다. 포트 연결과 전원을 확인하고, "
-                     "측정 중이라면 정지한 뒤 다시 시도하세요.")
-            return
-        st.caption("{0} · {1} bps · 읽은 시각 {2}".format(
-            status["port"], status["baud"], st.session_state.get("device_status_time", "-")))
-        cols = st.columns(len(read_status.STATUS_LAYOUT))
-        values = status["values"]
-        for col, (gkey, gtitle, fields) in zip(cols, read_status.STATUS_LAYOUT):
-            with col:
-                st.markdown("**{0}**".format(STATUS_GROUP_LABELS.get(gkey, gtitle)))
-                rows = [{"항목": STATUS_FIELD_LABELS.get(fkey, flabel), "값": values.get(fkey, "-")}
-                        for fkey, flabel in fields]
-                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.caption("{0} · {1} bps · 읽은 시각 {2}".format(
+        status["port"], status["baud"], st.session_state.get("device_status_time", "-")))
+    cols = st.columns(len(read_status.STATUS_LAYOUT))
+    values = status["values"]
+    for col, (gkey, gtitle, fields) in zip(cols, read_status.STATUS_LAYOUT):
+        with col:
+            st.markdown("**{0}**".format(STATUS_GROUP_LABELS.get(gkey, gtitle)))
+            rows = [{"항목": STATUS_FIELD_LABELS.get(fkey, flabel), "값": values.get(fkey, "-")}
+                    for fkey, flabel in fields]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 def csv_rows(path):
@@ -140,10 +138,10 @@ st.sidebar.header("측정")
 minutes = st.sidebar.number_input("측정 시간 (분)", min_value=0.1, max_value=120.0,
                                   value=10.0, step=1.0)
 b_start, b_stop = st.sidebar.columns(2)
-if b_start.button("시작", disabled=logger_running(), use_container_width=True):
+if b_start.button("시작", disabled=logger_running(), width="stretch"):
     start_logger(minutes)
     st.rerun()
-if b_stop.button("정지", disabled=not logger_running(), use_container_width=True):
+if b_stop.button("정지", disabled=not logger_running(), width="stretch"):
     stop_logger()
     st.rerun()
 
@@ -173,11 +171,11 @@ with st.sidebar.expander("로거 출력"):
 # --- Sensor status: read the device configuration on demand ---
 # The serial port is single-owner, so this is disabled while a measurement holds it.
 st.sidebar.header("센서 정보")
-if st.sidebar.button("센서 상태 읽기", disabled=logger_running(), use_container_width=True):
+if st.sidebar.button("센서 상태 읽기", disabled=logger_running(), width="stretch"):
     with st.spinner("센서 상태를 읽는 중... (몇 초 걸릴 수 있습니다)"):
         st.session_state["device_status"] = read_status.read_device_status()
     st.session_state["device_status_time"] = time.strftime("%H:%M:%S")
-    st.rerun()
+    device_status_dialog()
 if logger_running():
     st.sidebar.caption("측정 중에는 상태를 읽을 수 없습니다 (포트 사용 중)")
 
@@ -190,9 +188,6 @@ selected = st.sidebar.selectbox(
     format_func=os.path.basename) if review_files else None
 uploaded = st.sidebar.file_uploader("또는 CSV 업로드", type=["csv"])
 st.sidebar.caption("임계값: {0}% (1/1000)".format(SLOPE_THRESHOLD_PCT))
-
-# Sensor status panel (independent of the CSV selection below).
-render_device_status()
 
 path = None
 if uploaded is not None:
@@ -260,7 +255,7 @@ ts.update_yaxes(title_text="각도 (deg)", secondary_y=False)
 ts.update_yaxes(title_text="기울기 (%)", secondary_y=True)
 ts.update_layout(height=420, margin=dict(t=30, b=10), legend=dict(orientation="h"))
 st.subheader("시계열")
-st.plotly_chart(ts, use_container_width=True)
+st.plotly_chart(ts, width="stretch")
 
 left, right = st.columns(2)
 
@@ -269,7 +264,7 @@ with left:
     st.subheader("기울기 분포")
     hist = go.Figure(go.Histogram(x=slope[~np.isnan(slope)], nbinsx=60))
     hist.update_layout(height=350, margin=dict(t=10), xaxis_title="기울기 (%)", yaxis_title="빈도")
-    st.plotly_chart(hist, use_container_width=True)
+    st.plotly_chart(hist, width="stretch")
 
 # --- Sway spectrum (FFT of slope) ---
 with right:
@@ -303,7 +298,7 @@ with right:
     spec.update_xaxes(title_text="주파수 (Hz)", range=[0, min(5.0, fs / 2)])
     spec.update_yaxes(title_text="진폭")
     spec.update_layout(height=350, margin=dict(t=30))
-    st.plotly_chart(spec, use_container_width=True)
+    st.plotly_chart(spec, width="stretch")
 
 # --- Optional raw channels ---
 with st.expander("자이로 및 온도"):
@@ -319,7 +314,7 @@ with st.expander("자이로 및 온도"):
     extra.update_yaxes(title_text="자이로 (deg/s)", secondary_y=False)
     extra.update_yaxes(title_text="온도 (C)", secondary_y=True)
     extra.update_layout(height=350, margin=dict(t=10), legend=dict(orientation="h"))
-    st.plotly_chart(extra, use_container_width=True)
+    st.plotly_chart(extra, width="stretch")
 
 # --- Full text report (reuses analyze_tilt) ---
 with st.expander("전체 분석 리포트"):
