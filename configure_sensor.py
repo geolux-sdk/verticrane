@@ -35,13 +35,19 @@ def connectAutoBaud():
     return None
 
 
+def _hex(v):
+    # Tolerate a failed read (None) instead of crashing the status print.
+    return "0x{0:04X}".format(v) if v is not None else "None (read failed)"
+
+
 def show(device, label):
     device.readReg(0x23, 1)  # ORIENT
     device.readReg(0x24, 1)  # AXIS6
     orient = device.registerData.get(0x23)
     axis6 = device.registerData.get(0x24)
-    print("{0}: ORIENT=0x{1:04X} ({2}), AXIS6=0x{3:04X} ({4})".format(
-        label, orient, ORIENT_MAP.get(orient, "?"), axis6, AXIS6_MAP.get(axis6, "?")))
+    print("{0}: ORIENT={1} ({2}), AXIS6={3} ({4})".format(
+        label, _hex(orient), ORIENT_MAP.get(orient, "?"),
+        _hex(axis6), AXIS6_MAP.get(axis6, "?")))
     return orient, axis6
 
 
@@ -66,7 +72,7 @@ def main():
         if axis6 == 0x0001:
             print("OK: sensor is now in 6-axis mode for tilt measurement.")
         else:
-            print("WARNING: AXIS6 did not read back as 0x0001 (got 0x{0:04X}).".format(axis6))
+            print("WARNING: AXIS6 did not read back as 0x0001 (got {0}).".format(_hex(axis6)))
     finally:
         device.closeDevice()
 

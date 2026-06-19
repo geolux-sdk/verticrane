@@ -188,7 +188,9 @@ ts.add_trace(go.Scatter(x=t, y=pitch, name="Pitch", line=dict(width=1)), seconda
 ts.add_trace(go.Scatter(x=t, y=slope, name="기울기 %", line=dict(width=1, color="crimson")),
              secondary_y=True)
 if len(slope_ma):
-    ts.add_trace(go.Scatter(x=t[ma_win - 1:], y=slope_ma, name="기울기 1초평균",
+    # Align x to the actual moving-average length: the window-1 trailing offset
+    # in the normal case, or the full series when the log is shorter than ma_win.
+    ts.add_trace(go.Scatter(x=t[-len(slope_ma):], y=slope_ma, name="기울기 1초평균",
                             line=dict(width=2, color="darkred")), secondary_y=True)
 ts.add_hline(y=SLOPE_THRESHOLD_PCT, line=dict(color="red", dash="dash"),
              secondary_y=True, annotation_text="{0}%".format(SLOPE_THRESHOLD_PCT))

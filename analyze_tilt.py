@@ -50,17 +50,20 @@ def _top_peaks(amp, k):
 
 
 def _read(csv_path):
-    data = {}
     with open(csv_path, newline="") as f:
         r = csv.DictReader(f)
-        for name in r.fieldnames:
-            data[name] = []
+        fields = r.fieldnames or []
+        data = {name: [] for name in fields}
         for row in r:
-            for name in r.fieldnames:
-                try:
-                    data[name].append(float(row[name]))
-                except (ValueError, TypeError):
-                    pass
+            # One row = one sample: parse all columns together and skip the whole
+            # row if any value is missing/non-numeric, so every column stays the
+            # same length (later code cross-indexes roll[i]/pitch[i]).
+            try:
+                vals = [float(row[name]) for name in fields]
+            except (ValueError, TypeError):
+                continue
+            for name, v in zip(fields, vals):
+                data[name].append(v)
     return data
 
 
@@ -98,14 +101,18 @@ def analyze(csv_path):
     L.append("")
 
     # Tilt deviation from the mean orientation (removes the static bench/mount offset).
-    rm = sum(roll) / len(roll)
-    pm = sum(pitch) / len(pitch)
-    dev = sorted(math.hypot(roll[i] - rm, pitch[i] - pm) for i in range(len(roll)))
-    p99 = dev[int(0.99 * len(dev))]
     L.append("평균 자세 대비 기울기 편차 (deg)")
     L.append("-" * 60)
-    L.append("최대={0:.4f}  평균={1:.4f}  p99={2:.4f}".format(
-        dev[-1], sum(dev) / len(dev), p99))
+    if roll and pitch:
+        m = min(len(roll), len(pitch))
+        rm = sum(roll[:m]) / m
+        pm = sum(pitch[:m]) / m
+        dev = sorted(math.hypot(roll[i] - rm, pitch[i] - pm) for i in range(m))
+        p99 = dev[min(int(0.99 * len(dev)), len(dev) - 1)]
+        L.append("최대={0:.4f}  평균={1:.4f}  p99={2:.4f}".format(
+            dev[-1], sum(dev) / len(dev), p99))
+    else:
+        L.append("Roll_deg / Pitch_deg 데이터가 없어 계산할 수 없습니다")
     L.append("")
 
     # Effect of a short filter on the alarm path.
@@ -122,7 +129,7 @@ def analyze(csv_path):
     # Sway spectrum: dominant frequencies (FFT of slope).
     L.append("흔들림 스펙트럼 (기울기 FFT) - 상위 3개 피크")
     L.append("-" * 60)
-    if n > 1 and rate > 0:
+    if n > 2 and rate > 0:
         s = np.asarray(slope, dtype=float)
         s = s - s.mean()
         win = np.hanning(len(s))
@@ -145,18 +152,20 @@ def analyze(csv_path):
     L.append("")
 
     # Plain-language assessment against the project targets.
-    _, roll_sd, _, _, _ = _stats(roll)
-    _, pitch_sd, _, _, _ = _stats(pitch)
     # Uprightness metric: peak of the 1 s moving average of the resultant slope.
     slope_ma = _moving(slope, w, False)
     ma_peak = max(slope_ma)
     L.append("평가 (목표: 정확도 {0} deg, 경보 {1}%)".format(
         ANGLE_REQ_DEG, SLOPE_THRESH_PCT))
     L.append("-" * 60)
-    L.append("Roll  노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
-        roll_sd, "통과" if 3 * roll_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
-    L.append("Pitch 노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
-        pitch_sd, "통과" if 3 * pitch_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
+    if roll:
+        _, roll_sd, _, _, _ = _stats(roll)
+        L.append("Roll  노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
+            roll_sd, "통과" if 3 * roll_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
+    if pitch:
+        _, pitch_sd, _, _, _ = _stats(pitch)
+        L.append("Pitch 노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
+            pitch_sd, "통과" if 3 * pitch_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
     L.append("기울기 원본 최대         = {0:.4f} %".format(max(slope)))
     L.append("기울기 {0:.0f}초평균 피크(최대) = {1:.4f} %  -> {2} (임계값 {3}% 대비)".format(
         FILTER_SECONDS, ma_peak,
