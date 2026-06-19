@@ -72,20 +72,20 @@ def analyze(csv_path):
     elapsed = data.get("elapsed_s", [])
     n = len(slope)
     if n == 0:
-        return "No numeric data found in {0}".format(csv_path)
+        return "{0} 에서 숫자 데이터를 찾을 수 없습니다".format(csv_path)
 
     dur = elapsed[-1] - elapsed[0] if len(elapsed) > 1 else 0.0
     rate = (n - 1) / dur if dur > 0 else 0.0
     w = max(1, int(round(FILTER_SECONDS * rate)))
 
     L = []
-    L.append("Tilt log analysis: {0}".format(os.path.basename(csv_path)))
+    L.append("기울기 로그 분석: {0}".format(os.path.basename(csv_path)))
     L.append("=" * 60)
-    L.append("samples : {0}".format(n))
-    L.append("duration: {0:.1f} s   rate: {1:.2f} Hz".format(dur, rate))
+    L.append("샘플 수 : {0}".format(n))
+    L.append("측정 시간: {0:.1f} s   샘플링: {1:.2f} Hz".format(dur, rate))
     L.append("")
 
-    L.append("Per-field statistics")
+    L.append("항목별 통계")
     L.append("-" * 60)
     L.append("{0:<12}{1:>11}{2:>11}{3:>11}{4:>11}{5:>11}".format(
         "field", "mean", "std", "min", "max", "pk-pk"))
@@ -102,25 +102,25 @@ def analyze(csv_path):
     pm = sum(pitch) / len(pitch)
     dev = sorted(math.hypot(roll[i] - rm, pitch[i] - pm) for i in range(len(roll)))
     p99 = dev[int(0.99 * len(dev))]
-    L.append("Tilt deviation from mean orientation (deg)")
+    L.append("평균 자세 대비 기울기 편차 (deg)")
     L.append("-" * 60)
-    L.append("max={0:.4f}  mean={1:.4f}  p99={2:.4f}".format(
+    L.append("최대={0:.4f}  평균={1:.4f}  p99={2:.4f}".format(
         dev[-1], sum(dev) / len(dev), p99))
     L.append("")
 
     # Effect of a short filter on the alarm path.
-    L.append("Short-filter effect (window {0} samples ~ {1:.1f} s)".format(w, FILTER_SECONDS))
+    L.append("단기 필터 효과 (윈도우 {0} 샘플 ~ {1:.1f} s)".format(w, FILTER_SECONDS))
     L.append("-" * 60)
     L.append("{0:<16}{1:>11}{2:>11}".format("slope_pct", "pk-pk", "std"))
-    for label, series in (("raw", slope),
-                          ("moving-avg", _moving(slope, w, False)),
-                          ("moving-median", _moving(slope, w, True))):
+    for label, series in (("원본", slope),
+                          ("이동평균", _moving(slope, w, False)),
+                          ("이동중앙값", _moving(slope, w, True))):
         _, sd, _, _, pp = _stats(series)
         L.append("{0:<16}{1:>11.4f}{2:>11.4f}".format(label, pp, sd))
     L.append("")
 
     # Sway spectrum: dominant frequencies (FFT of slope).
-    L.append("Sway spectrum (FFT of slope) - top 3 peaks")
+    L.append("흔들림 스펙트럼 (기울기 FFT) - 상위 3개 피크")
     L.append("-" * 60)
     if n > 1 and rate > 0:
         s = np.asarray(slope, dtype=float)
@@ -131,12 +131,12 @@ def analyze(csv_path):
         if top:
             for rank, i in enumerate(top, 1):
                 period = 1.0 / freq[i] if freq[i] > 0 else float("inf")
-                L.append("#{0}  {1:.3f} Hz  (period {2:.2f} s)  amplitude {3:.4f}".format(
+                L.append("#{0}  {1:.3f} Hz  (주기 {2:.2f} s)  진폭 {3:.4f}".format(
                     rank, freq[i], period, amp[i]))
         else:
-            L.append("no clear spectral peak")
+            L.append("뚜렷한 스펙트럼 피크 없음")
     else:
-        L.append("insufficient data for spectrum")
+        L.append("스펙트럼 분석에 데이터가 부족함")
     L.append("")
 
     # Plain-language assessment against the project targets.
@@ -145,24 +145,24 @@ def analyze(csv_path):
     # Uprightness metric: peak of the 1 s moving average of the resultant slope.
     slope_ma = _moving(slope, w, False)
     ma_peak = max(slope_ma)
-    L.append("Assessment (targets: {0} deg accuracy, {1}% alarm)".format(
+    L.append("평가 (목표: 정확도 {0} deg, 경보 {1}%)".format(
         ANGLE_REQ_DEG, SLOPE_THRESH_PCT))
     L.append("-" * 60)
-    L.append("Roll  noise std = {0:.4f} deg  -> {1} (req <= {2})".format(
-        roll_sd, "PASS" if 3 * roll_sd <= ANGLE_REQ_DEG else "CHECK (3-sigma > req)", ANGLE_REQ_DEG))
-    L.append("Pitch noise std = {0:.4f} deg  -> {1} (req <= {2})".format(
-        pitch_sd, "PASS" if 3 * pitch_sd <= ANGLE_REQ_DEG else "CHECK (3-sigma > req)", ANGLE_REQ_DEG))
-    L.append("slope raw max            = {0:.4f} %".format(max(slope)))
-    L.append("slope {0:.0f}s-avg peak (max)  = {1:.4f} %  -> {2} (vs {3}% threshold)".format(
+    L.append("Roll  노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
+        roll_sd, "통과" if 3 * roll_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
+    L.append("Pitch 노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
+        pitch_sd, "통과" if 3 * pitch_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
+    L.append("기울기 원본 최대         = {0:.4f} %".format(max(slope)))
+    L.append("기울기 {0:.0f}초평균 피크(최대) = {1:.4f} %  -> {2} (임계값 {3}% 대비)".format(
         FILTER_SECONDS, ma_peak,
-        "OVER" if ma_peak > SLOPE_THRESH_PCT else "under", SLOPE_THRESH_PCT))
+        "초과" if ma_peak > SLOPE_THRESH_PCT else "이내", SLOPE_THRESH_PCT))
     L.append("")
     return "\n".join(L)
 
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: python analyze_tilt.py <path-to-csv>")
+        print("사용법: python analyze_tilt.py <CSV 경로>")
         return
     csv_path = sys.argv[1]
     report = analyze(csv_path)
@@ -170,7 +170,7 @@ def main():
     txt_path = os.path.splitext(csv_path)[0] + ".txt"
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(report + "\n")
-    print("Report written to {0}".format(txt_path))
+    print("리포트를 {0} 에 저장했습니다".format(txt_path))
 
 
 if __name__ == "__main__":
