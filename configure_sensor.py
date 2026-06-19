@@ -8,12 +8,15 @@
 #
 # The write is persisted (survives power cycle). Re-run with AXIS6=0x00 to revert.
 
+import argparse
 import time
 
 from hwt9037_485 import HWT9037_485
+from port_config import add_port_argument, resolve_port
 
 
-PORT_NAME = "COM11"
+# Resolved from --port / VERTICRANE_PORT / auto-detect in main().
+PORT_NAME = None
 DEVICE_ADDR = 0x50
 CANDIDATE_BAUDS = [9600, 115200]
 
@@ -52,6 +55,12 @@ def show(device, label):
 
 
 def main():
+    global PORT_NAME
+    parser = argparse.ArgumentParser(description="Configure HWT9037-485 for tilt measurement (6-axis).")
+    add_port_argument(parser)
+    args = parser.parse_args()
+    PORT_NAME = resolve_port(args.port)
+
     device = connectAutoBaud()
     if device is None:
         print("Could not reach the device on {0}".format(PORT_NAME))

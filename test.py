@@ -1,4 +1,6 @@
 from hwt9037_485 import HWT9037_485
+from port_config import add_port_argument, resolve_port
+import argparse
 import time
 
 
@@ -17,7 +19,8 @@ REGISTER_DUMP_RANGES = [
 ]
 
 
-PORT_NAME = "COM11"
+# Resolved from --port / VERTICRANE_PORT / auto-detect in __main__.
+PORT_NAME = None
 DEVICE_ADDR = 0x50
 DEFAULT_BAUD = 9600
 SESSION_BAUD = 115200
@@ -101,6 +104,11 @@ def setSessionBaudrate(baud=SESSION_BAUD):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="HWT9037-485 loop-read test entrypoint.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+    PORT_NAME = resolve_port(args.port)
+
     try:
         device = createDevice(SESSION_BAUD)
         device.openDevice()

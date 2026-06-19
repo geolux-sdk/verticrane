@@ -8,21 +8,23 @@
 # avoid aliasing high-frequency vibration into the slow tilt band. 25 Hz adds a guard band.
 # Analysis is done separately/later -- this script only captures raw measurements.
 
+import argparse
 import csv
 import math
 import os
-import sys
 import time
 
 import analyze_tilt
 from hwt9037_485 import HWT9037_485
+from port_config import add_port_argument, resolve_port
 
 
 # All measurements (CSV + matching analysis .txt) are stored here.
 OUTPUT_DIR = "data"
 
 
-PORT_NAME = "COM11"
+# Resolved from --port / VERTICRANE_PORT / auto-detect in main().
+PORT_NAME = None
 DEVICE_ADDR = 0x50
 # The device powers on at 9600 bps but may be saved to 115200; probe both.
 CANDIDATE_BAUDS = [9600, 115200]
@@ -60,9 +62,15 @@ def resultant_slope_pct(roll_deg, pitch_deg):
 
 
 def main():
-    minutes = DEFAULT_MINUTES
-    if len(sys.argv) > 1:
-        minutes = float(sys.argv[1])
+    global PORT_NAME
+    parser = argparse.ArgumentParser(description="Log HWT9037-485 tilt data to CSV.")
+    parser.add_argument("minutes", nargs="?", type=float, default=DEFAULT_MINUTES,
+                        help="Logging duration in minutes (default {0:.0f}).".format(DEFAULT_MINUTES))
+    add_port_argument(parser)
+    args = parser.parse_args()
+    PORT_NAME = resolve_port(args.port)
+
+    minutes = args.minutes
     duration_s = minutes * 60.0
     period = 1.0 / SAMPLE_RATE_HZ
 

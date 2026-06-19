@@ -1,12 +1,15 @@
 # coding:UTF-8
 # Read the current HWT9037-485 device status and print a decoded report.
 
+import argparse
 import time
 
 from hwt9037_485 import HWT9037_485
+from port_config import add_port_argument, resolve_port
 
 
-PORT_NAME = "COM11"
+# Resolved from --port / VERTICRANE_PORT / auto-detect in main().
+PORT_NAME = None
 DEVICE_ADDR = 0x50
 # The device powers on at 9600 bps (factory default) but can be switched and saved to a
 # higher rate. Probe the likely rates and use whichever one answers.
@@ -129,6 +132,12 @@ def connectAutoBaud():
 
 
 def main():
+    global PORT_NAME
+    parser = argparse.ArgumentParser(description="Read and decode HWT9037-485 device status.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+    PORT_NAME = resolve_port(args.port)
+
     device, baud = connectAutoBaud()
     if device is None:
         print("Could not reach the device on {0} at any candidate baud rate".format(PORT_NAME))
