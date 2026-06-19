@@ -271,8 +271,7 @@ Save / reboot / factory reset.
   success) but the value is ignored — an immediate read still returns `0x03`. Verified
   2026-06-19 with RAM-only write, write+reboot (`SAVE`=`0x00FF`), and save+reboot; none
   took effect. Acceleration output is therefore always 16g full-scale (at rest AccZ raw
-  ≈ 2050 = 1g), so the fixed `AX/32768*16` conversion stays correct. See
-  `compare_accrange.py` for the diagnostic.
+  ≈ 2050 = 1g), so the fixed `AX/32768*16` conversion stays correct.
 
 ### `SLEEP` (`0x22`)
 
