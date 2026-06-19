@@ -53,16 +53,19 @@ def _read(csv_path):
     with open(csv_path, newline="") as f:
         r = csv.DictReader(f)
         fields = r.fieldnames or []
-        data = {name: [] for name in fields}
+        # The timestamp column is text, not a number; parse only the numeric columns
+        # (parsing it too would make every row fail and drop all data).
+        numeric_fields = [name for name in fields if name != "timestamp"]
+        data = {name: [] for name in numeric_fields}
         for row in r:
-            # One row = one sample: parse all columns together and skip the whole
-            # row if any value is missing/non-numeric, so every column stays the
-            # same length (later code cross-indexes roll[i]/pitch[i]).
+            # One row = one sample: parse the numeric columns together and skip the
+            # whole row if any value is missing/non-numeric, so every column stays
+            # the same length (later code cross-indexes roll[i]/pitch[i]).
             try:
-                vals = [float(row[name]) for name in fields]
+                vals = [float(row[name]) for name in numeric_fields]
             except (ValueError, TypeError):
                 continue
-            for name, v in zip(fields, vals):
+            for name, v in zip(numeric_fields, vals):
                 data[name].append(v)
     return data
 
