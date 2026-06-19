@@ -1,0 +1,3 @@
+# Hide the multipage navigation so the /setup admin page is reachable only by URL.
+[client]
+showSidebarNavigation = false

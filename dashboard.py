@@ -22,10 +22,16 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import analyze_tilt
+import app_config
 import read_status
 
 DATA_DIR = "data"
-SLOPE_THRESHOLD_PCT = 0.1  # 0.1% = 1/1000 alarm threshold
+
+# Judgment criteria are editable by the admin on the hidden /setup page.
+_cfg = app_config.load()
+SLOPE_THRESHOLD_PCT = float(_cfg["slope_threshold_pct"])  # tilt alarm threshold (%)
+MA_SECONDS = float(_cfg["ma_seconds"])                    # moving-average window (s)
+MA_LABEL = "{0:g}초".format(MA_SECONDS)                   # e.g. "1초", "0.5초"
 
 # Korean labels for the sensor-status panel, keyed by read_status.STATUS_LAYOUT keys.
 STATUS_GROUP_LABELS = {
@@ -215,8 +221,7 @@ n = len(df)
 dur = float(t[-1] - t[0]) if n > 1 else 0.0
 fs = (n - 1) / dur if dur > 0 else 25.0
 
-# --- 1-second moving average; its max is the tilt-magnitude (uprightness) metric ---
-MA_SECONDS = 1.0
+# --- Moving average (window from config); its max is the uprightness metric ---
 ma_win = max(1, int(round(MA_SECONDS * fs)))
 slope_ma = moving_average(slope, ma_win)
 slope_peak = float(np.nanmax(slope_ma)) if len(slope_ma) else float("nan")
@@ -232,14 +237,14 @@ cols[1].metric("샘플링 (Hz)", "{0:.1f}".format(fs))
 cols[2].metric("Roll 표준편차 (deg)", "{0:.4f}".format(np.nanstd(roll)))
 cols[3].metric("Pitch 표준편차 (deg)", "{0:.4f}".format(np.nanstd(pitch)))
 cols[4].metric("기울기 평균 (%)", "{0:.4f}".format(np.nanmean(slope)))
-cols[5].metric("기울기 1초평균 피크 (%)", "{0:.4f}".format(slope_peak))
+cols[5].metric("기울기 {0}평균 피크 (%)".format(MA_LABEL), "{0:.4f}".format(slope_peak))
 
 if slope_peak > SLOPE_THRESHOLD_PCT:
-    st.warning("1초 평균 기울기 피크 {0:.4f}%가 임계값 {1}%를 초과했습니다".format(
-        slope_peak, SLOPE_THRESHOLD_PCT))
+    st.warning("{0} 평균 기울기 피크 {1:.4f}%가 임계값 {2}%를 초과했습니다".format(
+        MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT))
 else:
-    st.success("1초 평균 기울기 피크 {0:.4f}%가 임계값 {1}% 이내입니다".format(
-        slope_peak, SLOPE_THRESHOLD_PCT))
+    st.success("{0} 평균 기울기 피크 {1:.4f}%가 임계값 {2}% 이내입니다".format(
+        MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT))
 
 # --- Time series: resultant tilt, read on both deg (left) and % (right) axes ---
 ts = make_subplots(specs=[[{"secondary_y": True}]])
@@ -248,7 +253,7 @@ ts.add_trace(go.Scatter(x=t, y=tilt, name="기울기", line=dict(width=1, color=
 if len(tilt_ma):
     # Align x to the actual moving-average length: the window-1 trailing offset
     # in the normal case, or the full series when the log is shorter than ma_win.
-    ts.add_trace(go.Scatter(x=t[-len(tilt_ma):], y=tilt_ma, name="기울기 1초평균",
+    ts.add_trace(go.Scatter(x=t[-len(tilt_ma):], y=tilt_ma, name="기울기 {0}평균".format(MA_LABEL),
                             line=dict(width=2, color="darkred")), secondary_y=False)
 # Invisible anchor on the right axis so its % ticks and the 0.1% line render
 # (tilt and slope are the same curve, so no separate visible line is drawn).

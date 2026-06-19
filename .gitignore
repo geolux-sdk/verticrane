@@ -4,6 +4,9 @@ __pycache__/
 # Python virtual environment (created by install_requirements.sh on Linux)
 .venv/
 
+# Per-deployment settings + admin PIN hash (managed via the /setup page)
+config.json
+
 # Measurement data (logs and analysis reports)
 data/
 

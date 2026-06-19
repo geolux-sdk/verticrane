@@ -12,10 +12,11 @@ import sys
 
 import numpy as np
 
-# Requirement targets for this project.
+import app_config
+
+# Fixed project target. The alarm threshold and moving-average window are
+# admin-editable (see app_config / the /setup page) and read per analyze() call.
 ANGLE_REQ_DEG = 0.01     # required tilt accuracy
-SLOPE_THRESH_PCT = 0.1   # alarm threshold (1/1000 = 0.1%)
-FILTER_SECONDS = 1.0     # moving-average window for the tilt-peak (uprightness) metric
 
 
 def _stats(x):
@@ -80,9 +81,14 @@ def analyze(csv_path):
     if n == 0:
         return "{0} 에서 숫자 데이터를 찾을 수 없습니다".format(csv_path)
 
+    # Admin-editable judgment criteria (same source as the dashboard).
+    cfg = app_config.load()
+    slope_thresh = float(cfg["slope_threshold_pct"])
+    filter_seconds = float(cfg["ma_seconds"])
+
     dur = elapsed[-1] - elapsed[0] if len(elapsed) > 1 else 0.0
     rate = (n - 1) / dur if dur > 0 else 0.0
-    w = max(1, int(round(FILTER_SECONDS * rate)))
+    w = max(1, int(round(filter_seconds * rate)))
 
     L = []
     L.append("기울기 로그 분석: {0}".format(os.path.basename(csv_path)))
@@ -119,7 +125,7 @@ def analyze(csv_path):
     L.append("")
 
     # Effect of a short filter on the alarm path.
-    L.append("단기 필터 효과 (윈도우 {0} 샘플 ~ {1:.1f} s)".format(w, FILTER_SECONDS))
+    L.append("단기 필터 효과 (윈도우 {0} 샘플 ~ {1:.1f} s)".format(w, filter_seconds))
     L.append("-" * 60)
     L.append("{0:<16}{1:>11}{2:>11}".format("slope_pct", "pk-pk", "std"))
     for label, series in (("원본", slope),
@@ -159,7 +165,7 @@ def analyze(csv_path):
     slope_ma = _moving(slope, w, False)
     ma_peak = max(slope_ma)
     L.append("평가 (목표: 정확도 {0} deg, 경보 {1}%)".format(
-        ANGLE_REQ_DEG, SLOPE_THRESH_PCT))
+        ANGLE_REQ_DEG, slope_thresh))
     L.append("-" * 60)
     if roll:
         _, roll_sd, _, _, _ = _stats(roll)
@@ -170,9 +176,9 @@ def analyze(csv_path):
         L.append("Pitch 노이즈 표준편차 = {0:.4f} deg  -> {1} (요구 <= {2})".format(
             pitch_sd, "통과" if 3 * pitch_sd <= ANGLE_REQ_DEG else "점검 (3시그마 > 요구)", ANGLE_REQ_DEG))
     L.append("기울기 원본 최대         = {0:.4f} %".format(max(slope)))
-    L.append("기울기 {0:.0f}초평균 피크(최대) = {1:.4f} %  -> {2} (임계값 {3}% 대비)".format(
-        FILTER_SECONDS, ma_peak,
-        "초과" if ma_peak > SLOPE_THRESH_PCT else "이내", SLOPE_THRESH_PCT))
+    L.append("기울기 {0:g}초평균 피크(최대) = {1:.4f} %  -> {2} (임계값 {3}% 대비)".format(
+        filter_seconds, ma_peak,
+        "초과" if ma_peak > slope_thresh else "이내", slope_thresh))
     L.append("")
     return "\n".join(L)
 
