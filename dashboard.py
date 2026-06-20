@@ -8,38 +8,42 @@
 # measurement, which launches log_tilt.py as a separate process (the dashboard
 # itself never opens the serial port).
 
+from __future__ import annotations
+
 import glob
 import os
 import subprocess
 import sys
 import tempfile
 import time
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from loguru import logger
 from plotly.subplots import make_subplots
 
 import analyze_tilt
-import app_config
+import app_config  # importing app_config also applies the central loguru LOG_LEVEL
 import read_status
 
-DATA_DIR = "data"
+DATA_DIR: str = "data"
 
 # Judgment criteria are editable by the admin on the hidden /setup page.
-_cfg = app_config.load()
-SLOPE_THRESHOLD_PCT = float(_cfg["slope_threshold_pct"])  # tilt alarm threshold (%)
-MA_SECONDS = float(_cfg["ma_seconds"])                    # moving-average window (s)
-MA_LABEL = "{0:g}초".format(MA_SECONDS)                   # e.g. "1초", "0.5초"
+_cfg: dict[str, Any] = app_config.load()
+SLOPE_THRESHOLD_PCT: float = float(_cfg["slope_threshold_pct"])  # tilt alarm threshold (%)
+MA_SECONDS: float = float(_cfg["ma_seconds"])                    # moving-average window (s)
+MA_LABEL: str = "{0:g}초".format(MA_SECONDS)                     # e.g. "1초", "0.5초"
 
 # Korean labels for the sensor-status panel, keyed by read_status.STATUS_LAYOUT keys.
-STATUS_GROUP_LABELS = {
+STATUS_GROUP_LABELS: dict[str, str] = {
     "identity": "식별 / 통신",
     "mode": "동작 모드",
     "filters": "필터",
 }
-STATUS_FIELD_LABELS = {
+STATUS_FIELD_LABELS: dict[str, str] = {
     "fw_version": "펌웨어 버전",
     "serial_number": "시리얼 번호",
     "modbus_addr": "Modbus 주소",
@@ -57,20 +61,20 @@ STATUS_FIELD_LABELS = {
 }
 
 
-def list_csvs():
+def list_csvs() -> list[str]:
     return sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
 
 
-LOGGER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_tilt.py")
-LOGGER_OUT = os.path.join(tempfile.gettempdir(), "verticrane_logger.out")
+LOGGER_SCRIPT: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_tilt.py")
+LOGGER_OUT: str = os.path.join(tempfile.gettempdir(), "verticrane_logger.out")
 
 
-def logger_running():
-    p = st.session_state.get("logger_proc")
+def logger_running() -> bool:
+    p: Optional[subprocess.Popen] = st.session_state.get("logger_proc")
     return p is not None and p.poll() is None
 
 
-def start_logger(minutes):
+def start_logger(minutes: float) -> None:
     # Remember the existing files so we can spot the new one this run creates.
     st.session_state["logger_before"] = set(list_csvs())
     out = open(LOGGER_OUT, "w")
@@ -79,22 +83,24 @@ def start_logger(minutes):
         cwd=os.path.dirname(LOGGER_SCRIPT), stdout=out, stderr=subprocess.STDOUT)
     out.close()  # the child keeps its own dup of the handle
     st.session_state["was_running"] = True
+    logger.info("Started measurement logger for {:g} min", minutes)
 
 
-def stop_logger():
-    p = st.session_state.get("logger_proc")
+def stop_logger() -> None:
+    p: Optional[subprocess.Popen] = st.session_state.get("logger_proc")
     if p is not None and p.poll() is None:
         p.terminate()
+        logger.info("Requested measurement logger to stop")
 
 
-def newest_active_csv():
-    before = st.session_state.get("logger_before", set())
-    new = sorted(set(list_csvs()) - before)
+def newest_active_csv() -> Optional[str]:
+    before: set[str] = st.session_state.get("logger_before", set())
+    new: list[str] = sorted(set(list_csvs()) - before)
     return new[-1] if new else None
 
 
 @st.dialog("센서 상태 정보", width="large")
-def device_status_dialog():
+def device_status_dialog() -> None:
     # Modal popup; opened by calling this function after a status read.
     status = st.session_state.get("device_status")
     if status is None:
@@ -113,15 +119,16 @@ def device_status_dialog():
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
-def csv_rows(path):
+def csv_rows(path: str) -> int:
     try:
         with open(path) as fh:
             return max(sum(1 for _ in fh) - 1, 0)
     except Exception:
+        logger.warning("Could not count rows in {}", path)
         return 0
 
 
-def moving_average(x, w):
+def moving_average(x: Any, w: int) -> np.ndarray:
     # Causal trailing average: each point is the mean of the previous w samples.
     x = np.asarray(x, dtype=float)
     if w <= 1 or len(x) < w:
@@ -131,12 +138,22 @@ def moving_average(x, w):
 
 
 @st.cache_data
-def read_csv(path, _mtime):
+def read_csv(path: str, _mtime: float) -> pd.DataFrame:
     # _mtime busts the cache when the file changes.
     return pd.read_csv(path)
 
 
+@st.cache_resource
+def _log_startup() -> bool:
+    # cache_resource caches across reruns and sessions, so this body runs once per
+    # process -- a single startup banner in the systemd journal, not on every rerun.
+    logger.info("Dashboard service started (data_dir={}, threshold={}%, ma={}s, log_level={})",
+                DATA_DIR, SLOPE_THRESHOLD_PCT, MA_SECONDS, _cfg.get("LOG_LEVEL"))
+    return True
+
+
 st.set_page_config(page_title="기울기 로그 대시보드", layout="wide")
+_log_startup()
 st.sidebar.title("기울기 로그")
 
 # --- Measurement control: run the logger as a separate process ---
@@ -153,7 +170,7 @@ if b_stop.button("정지", disabled=not logger_running(), width="stretch"):
 
 
 @st.fragment(run_every=2)
-def measurement_status():
+def measurement_status() -> None:
     # Rendered inside a `with st.sidebar` block, so use plain st.* here.
     if logger_running():
         active = newest_active_csv()
@@ -179,7 +196,12 @@ with st.sidebar.expander("로거 출력"):
 st.sidebar.header("센서 정보")
 if st.sidebar.button("센서 상태 읽기", disabled=logger_running(), width="stretch"):
     with st.spinner("센서 상태를 읽는 중... (몇 초 걸릴 수 있습니다)"):
-        st.session_state["device_status"] = read_status.read_device_status()
+        status: Optional[dict[str, Any]] = read_status.read_device_status()
+        st.session_state["device_status"] = status
+    if status is None:
+        logger.warning("Sensor status read failed (could not reach the device)")
+    else:
+        logger.info("Sensor status read at {} bps", status.get("baud"))
     st.session_state["device_status_time"] = time.strftime("%H:%M:%S")
     device_status_dialog()
 if logger_running():
@@ -208,6 +230,7 @@ if uploaded is not None:
         txt_path = os.path.splitext(path)[0] + ".txt"
         with open(txt_path, "w", encoding="utf-8") as fh:
             fh.write(analyze_tilt.analyze(path) + "\n")
+        logger.info("Saved uploaded CSV to data/ and generated report: {}", uploaded.name)
         st.toast("업로드 파일을 data/에 저장하고 리포트를 생성했습니다: {0}".format(uploaded.name))
 elif selected:
     path = selected
@@ -220,6 +243,13 @@ df = read_csv(path, os.path.getmtime(path))
 label = os.path.basename(path)
 st.title("기울기 로그 분석")
 st.caption(label)
+
+# Log a file-load/alarm summary only when the selected file changes, so the journal
+# shows activity without being flooded by Streamlit's per-interaction reruns.
+newly_loaded: bool = st.session_state.get("_loaded_path") != path
+if newly_loaded:
+    st.session_state["_loaded_path"] = path
+    logger.info("Loaded measurement file: {} ({} rows)", label, len(df))
 
 # --- Derived series ---
 t = df["elapsed_s"].to_numpy()
@@ -251,9 +281,15 @@ cols[5].metric("기울기 {0}평균 피크 (%)".format(MA_LABEL), "{0:.4f}".form
 if slope_peak > SLOPE_THRESHOLD_PCT:
     st.warning("{0} 평균 기울기 피크 {1:.4f}%가 임계값 {2}%를 초과했습니다".format(
         MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT))
+    if newly_loaded:
+        logger.warning("Tilt alarm: {} peak {:.4f}% exceeds threshold {}% ({})",
+                       MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT, label)
 else:
     st.success("{0} 평균 기울기 피크 {1:.4f}%가 임계값 {2}% 이내입니다".format(
         MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT))
+    if newly_loaded:
+        logger.info("Tilt OK: {} peak {:.4f}% within threshold {}% ({})",
+                    MA_LABEL, slope_peak, SLOPE_THRESHOLD_PCT, label)
 
 # --- Time series: resultant tilt, read on both deg (left) and % (right) axes ---
 ts = make_subplots(specs=[[{"secondary_y": True}]])
