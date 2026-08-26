@@ -25,7 +25,7 @@ if [ ! -f "${REQUIREMENTS_FILE}" ]; then
 fi
 
 if [ "${1:-}" = "--dry-run" ]; then
-    echo "python3 -m venv \"${VENV_DIR}\""
+    echo "python3 -m venv --system-site-packages \"${VENV_DIR}\""
     echo "${VENV_PY} -m pip install --upgrade pip"
     echo "${VENV_PY} -m pip install -r \"${REQUIREMENTS_FILE}\""
     exit 0
@@ -34,7 +34,12 @@ fi
 # Create the virtual environment once.
 if [ ! -x "${VENV_PY}" ]; then
     echo "Creating virtual environment in ${VENV_DIR} ..."
-    if ! python3 -m venv "${VENV_DIR}"; then
+    # --system-site-packages so the venv can use the distro's spidev and gpiozero,
+    # which the e-paper driver needs. Those are C extensions with no wheels for the
+    # Pi's Python 3.13, and building them on a 415 MB Zero 2 W is not worth it when
+    # apt already ships versions matched to the running kernel. Packages installed
+    # into the venv still take precedence over the system ones.
+    if ! python3 -m venv --system-site-packages "${VENV_DIR}"; then
         echo "Failed to create the venv. Install the venv package first:" >&2
         echo "  sudo apt install -y python3-venv python3-full" >&2
         exit 1
