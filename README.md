@@ -6,10 +6,21 @@ WitMotion **HWT9037-485** 9축 IMU(기울기 센서)를 Modbus RTU / RS-485로 �
 
 ## 하드웨어
 
+**표준 구성 (현장 배포)**
+
+- 보드: **Raspberry Pi Zero 2 W** + 타겟 보드 (RS-485 트랜시버 내장, 자동 방향전환)
 - 센서: **HWT9037-485** (9축 IMU, Modbus RTU over RS-485)
-- 연결: **USB-RS485 어댑터**(예: CH340) → Windows `COMx`, 라즈베리파이 `/dev/ttyUSB0`
+- 연결: 40핀 헤더 **8번 핀(GPIO14 TXD) / 10번 핀(GPIO15 RXD)** → 파이 온보드 UART `/dev/serial0`
 - 통신 속도: **115200 bps**(운용 기준). 공장 초기값은 9600이며 `configure_sensor.py`로 변경·저장
 - 프로토콜 상세: [doc/protocol.md](doc/protocol.md)
+
+온보드 UART는 기본적으로 꺼져 있습니다. 새 보드는 아래 **라즈베리파이 › 0. 시리얼 포트 열기**를
+최초 1회 실행해야 합니다.
+
+**개발/벤치 구성**
+
+- **USB-RS485 어댑터**(예: CH340) → Windows `COMx`, 리눅스 `/dev/ttyUSB0`.
+  별도 설정 없이 자동 감지되며, 온보드 UART가 없는 환경에서 선택됩니다
 
 ## 구성
 
@@ -98,6 +109,40 @@ python log_tilt.py 10          :: 10분간 기록 → data\*.csv + *.txt
 
 PEP 668 때문에 시스템 파이썬에 직접 설치할 수 없으므로 **가상환경 `.venv`** 를 사용합니다.
 설치/업데이트 스크립트가 `.venv`를 자동으로 만들고 사용합니다. **`sudo` 없이** 실행하세요.
+
+### 0. 시리얼 포트 열기 (최초 1회, 표준 하드웨어)
+
+파이의 온보드 UART는 **기본적으로 꺼져 있고**, 시리얼 콘솔이 그 포트를 점유합니다.
+게다가 Zero 2 W는 성능이 좋은 PL011을 블루투스가 가져가고 GPIO에는 mini UART를 배정하는데,
+mini UART는 보레이트가 코어 클럭에 묶여 있어 115200 Modbus에서 프레임이 깨질 수 있습니다.
+아래 설정으로 UART를 켜고, 콘솔을 떼고, PL011을 GPIO14/15에 배정합니다.
+
+```bash
+sudo cp /boot/firmware/config.txt  /boot/firmware/config.txt.bak
+sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
+
+# UART 활성화 + 블루투스를 떼어 PL011을 헤더로 보냄
+sudo tee -a /boot/firmware/config.txt >/dev/null <<'EOF'
+
+enable_uart=1
+dtoverlay=disable-bt
+EOF
+
+# 시리얼 콘솔 제거 (포트를 점유하므로)
+sudo sed -i 's/console=serial0,115200 //' /boot/firmware/cmdline.txt
+
+sudo reboot
+```
+
+재부팅 후 확인 — `/dev/serial0 -> ttyAMA0` 링크가 보이면 정상입니다.
+```bash
+ls -l /dev/serial0
+```
+
+> **블루투스도 써야 한다면** `disable-bt` 대신 **`miniuart-bt`** 를 쓰세요. 센서는 PL011을
+> 그대로 유지한 채 블루투스만 mini UART로 옮겨집니다. 포트 경로(`/dev/serial0`)도 그대로라
+> 코드 수정이 필요 없습니다. 대신 코어 클럭이 250MHz로 고정되고 BT 대역폭이 낮아집니다
+> (BLE·시리얼 프로파일 수준은 충분, 오디오 스트리밍은 무리).
 
 ### 1. 설치 (최초 1회)
 ```bash
@@ -206,18 +251,24 @@ python <스크립트>
 
 모든 도구는 다음 순서로 시리얼 포트를 결정합니다:
 
-1. `--port` 인자 (예: `--port /dev/ttyUSB0`)
+1. `--port` 인자 (예: `--port /dev/serial0`)
 2. `VERTICRANE_PORT` 환경변수
-3. USB 시리얼 어댑터 자동 감지
-4. 플랫폼 기본값 (Linux `/dev/ttyUSB0`, Windows `COM11`)
+3. 파이 온보드 UART `/dev/serial0` (없으면 `/dev/ttyAMA0`) — **표준 배선**
+4. USB 시리얼 어댑터 자동 감지
+5. 플랫폼 기본값 (Linux `/dev/serial0`, Windows `COM11`)
 
-어댑터가 여러 개면 `/dev/serial/by-id/...` 경로를 `--port`에 지정하는 것이 안정적입니다.
+온보드 UART와 USB 동글이 동시에 있으면 **온보드가 우선**합니다. GPS나 디버그 케이블 같은
+무관한 USB 시리얼 장치를 센서로 오인하지 않기 위해서입니다. 동글을 쓰려면 `--port`나
+`VERTICRANE_PORT`로 명시하세요. 어댑터가 여러 개면 `/dev/serial/by-id/...` 경로가 안정적입니다.
 
 ## 문제 해결
 
 - **`ModuleNotFoundError: No module named 'pymodbus'`** (라즈베리파이) — 시스템 `python`으로
   실행한 경우입니다. `.venv/bin/python <스크립트>` 또는 `source .venv/bin/activate` 후 실행하세요.
 - **`No response at 9600 bps` 메시지** — 정상입니다. 115200을 먼저 시도하므로 보통 바로 연결됩니다.
-- **센서 연결 실패** — (Pi) `dialout` 그룹 추가 후 재로그인했는지, USB 어댑터가 꽂혀 있는지,
-  다른 프로그램이 포트를 점유하고 있지 않은지 확인하세요.
+- **`/dev/serial0`이 없음** (Pi) — 온보드 UART가 아직 꺼져 있습니다. 위 **0. 시리얼 포트 열기**를
+  실행하고 재부팅하세요.
+- **센서 연결 실패** — (Pi) `dialout` 그룹 추가 후 재로그인했는지, 표준 배선이면 8·10번 핀 결선과
+  RS-485 A/B 극성이 맞는지, USB 구성이면 어댑터가 꽂혀 있는지, 다른 프로그램이 포트를 점유하고
+  있지 않은지 확인하세요.
 - **종합 점검** — Windows `python test.py`, 라즈베리파이 `./test.sh`로 어느 단계에서 막히는지 확인하세요.
