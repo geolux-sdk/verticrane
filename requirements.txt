@@ -8,7 +8,10 @@ pyserial>=3.5            # serial transport used by pymodbus
 # Structured logging (terminal + systemd journal)
 loguru>=0.7
 
-# Analysis dashboard (dashboard.py)
+# Operator web interface (recorder.py serves it on port 8080)
+flask>=3.0
+
+# Analysis dashboard (dashboard.py) -- developer only, not started by systemd
 streamlit>=1.58
 plotly>=6.8
 pandas>=2.3

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block body %}
+
+{% set STATE_LABEL = {"waiting_http": "접속 대기", "waiting_stable": "안정화 대기",
+                      "recording": "기록 중", "maintenance": "대기 (유지보수)"} %}
+
+<div class="card">
+  <h2>상태</h2>
+  {% if status %}
+  <div class="grid">
+    <div class="stat">
+      <b>{{ STATE_LABEL.get(status.state, status.state) }}</b>
+      <span>{% if status.state == "recording" %}{{ status.file }}{% else %}기록하지 않는 중{% endif %}</span>
+    </div>
+    <div class="stat">
+      <b>{{ "%.4f"|format(status.tilt) if status.tilt is not none else "-" }}<span
+        style="font-size:13px"> %</span></b>
+      <span>현재 기울기</span>
+    </div>
+    <div class="stat">
+      <b>{{ status.samples }}</b>
+      <span>샘플 · {{ "%.0f"|format(status.elapsed_s) }} 초</span>
+    </div>
+    <div class="stat">
+      <b>{{ "%.0f"|format(stats.free_mb) }}<span style="font-size:13px"> MB</span></b>
+      <span>남은 공간</span>
+    </div>
+  </div>
+
+  <p class="small" style="margin:14px 0 0">
+    센서
+    {% if status.sensor_ok %}<span class="pill ok">연결됨</span>
+    {% else %}<span class="pill bad">끊김</span>{% endif %}
+    &nbsp; 시각
+    {% if status.time_quality in ("synced", "rtc") %}
+      <span class="pill ok">{{ status.time_quality }}</span>
+    {% else %}
+      <span class="pill warn">{{ status.time_quality }}</span>
+      <span class="muted">— 아직 맞지 않았습니다. 네트워크가 있으면 곧 자동으로 맞춰집니다.</span>
+    {% endif %}
+    {% if status.temp_c is not none %}
+      &nbsp; 온도 <b>{{ "%.1f"|format(status.temp_c) }} ℃</b>
+    {% endif %}
+  </p>
+
+  {% if status.error %}
+    <div class="notice bad" style="margin-top:12px">{{ status.error }}</div>
+  {% endif %}
+
+  {% if status.stability and status.stability.metrics %}
+    <p class="small muted" style="margin:12px 0 4px">
+      안정화 판정: {{ status.stability.reason }}
+    </p>
+    <div class="wrap"><table>
+      <tr><th>지표</th><th class="num">측정값</th><th class="num">기준</th><th>판정</th></tr>
+      {% for m in status.stability.metrics %}
+      <tr>
+        <td>{{ m.label }}</td>
+        <td class="num">{{ "%.4g"|format(m.value) }}{{ m.unit }}</td>
+        <td class="num">{{ m.limit }}{{ m.unit }}</td>
+        <td>{% if m.ok %}<span class="pill ok">통과</span>
+            {% else %}<span class="pill bad">초과</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+  {% endif %}
+
+  <p style="margin:16px 0 0">
+    {% if status.state == "recording" %}
+      <button onclick="post('/api/record/stop')">기록 정지</button>
+    {% else %}
+      <button class="primary" onclick="post('/api/record/start')">지금 기록 시작</button>
+    {% endif %}
+  </p>
+  {% else %}
+    <p class="muted">기록기가 연결되어 있지 않습니다.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>기록 파일 ({{ stats.files }}개 · {{ "%.1f"|format(stats.bytes / 1048576) }} MB)</h2>
+
+  {% if not files %}
+    <p class="muted">아직 받을 파일이 없습니다. 기록이 끝나면 여기에 나타납니다.</p>
+  {% else %}
+    <div class="wrap"><table>
+      <tr>
+        <th>시작 시각</th><th class="num">길이</th><th class="num">샘플</th>
+        <th class="num">크기</th><th>비고</th><th></th>
+      </tr>
+      {% set ns = namespace(seen=[]) %}
+      {% for f in files %}
+      <tr>
+        <td>
+          {{ f.start }}
+          {% if not f.trusted_time %}<span class="pill warn" title="시각을 믿을 수 없습니다">?</span>{% endif %}
+        </td>
+        <td class="num">{{ "%.0f"|format(f.duration_s) }} 초</td>
+        <td class="num">{{ f.samples }}</td>
+        <td class="num">{{ "%.1f"|format(f.size / 1048576) }} MB</td>
+        <td class="small muted">
+          {% if f.recovered %}전원 차단 복구{% endif %}
+          {% if not f.trusted_time %} 시각 미확인{% endif %}
+        </td>
+        <td class="num">
+          <a class="btn" href="/api/files/{{ f.name }}">받기</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </table></div>
+
+    {% if stats.groups < stats.files %}
+      <p class="small muted" style="margin:12px 0 0">
+        시간이 이어지는 파일은 하나로 합쳐 받을 수 있습니다:
+        {% for g in files|map(attribute='group')|unique|sort %}
+          <a href="/api/groups/{{ g }}">그룹 {{ g }}</a>{% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </p>
+    {% endif %}
+
+    <p class="small muted" style="margin:12px 0 0">
+      받은 파일은 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
+      전송이 중간에 끊기면 파일은 그대로 있습니다.
+      {% if stats.trashed %} 현재 휴지통 {{ stats.trashed }}개.{% endif %}
+    </p>
+  {% endif %}
+</div>
+
+<script>
+async function post(url) {
+  const r = await fetch(url, {method: 'POST'});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || '실패했습니다.'); return; }
+  location.reload();
+}
+// The page is a snapshot; refresh it while a recording is running so the
+// operator can watch the sample count climb without tapping anything.
+{% if status and status.state in ("recording", "waiting_stable") %}
+setTimeout(() => location.reload(), 5000);
+{% endif %}
+</script>
+{% endblock %}

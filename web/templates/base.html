@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Verticrane 기록기{% endblock %}</title>
+<style>
+  /* One operator, one phone or laptop, on the vehicle's WiFi. No frameworks:
+     the page has to render before the network drops again. */
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #1b1f24; --muted: #6b7480;
+    --line: #dfe3e8; --ok: #1a7f37; --warn: #9a6700; --bad: #b42318;
+    --accent: #0b5fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --card: #1c2024; --ink: #e8eaed; --muted: #9aa4b0;
+      --line: #2c3238; --ok: #4ac26b; --warn: #d9a441; --bad: #ff6b5e;
+      --accent: #6c9bff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.55 -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; }
+  header { background: var(--card); border-bottom: 1px solid var(--line);
+           padding: 14px 18px; display: flex; align-items: center; gap: 14px;
+           position: sticky; top: 0; }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+  header nav { margin-left: auto; display: flex; gap: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { max-width: 940px; margin: 0 auto; padding: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line);
+          border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted);
+             font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line);
+           font-variant-numeric: tabular-nums; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .num { text-align: right; }
+  .wrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 99px;
+          font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+  .pill.ok   { color: var(--ok);   background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .pill.bad  { color: var(--bad);  background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .grid { display: grid; gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .stat b { display: block; font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  button, .btn { font: inherit; padding: 7px 14px; border-radius: 7px;
+                 border: 1px solid var(--line); background: var(--card);
+                 color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=text], input[type=number], input[type=password] {
+    font: inherit; padding: 7px 9px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--bg); color: var(--ink); width: 100%; }
+  .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
+  .notice.ok  { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+  .notice.bad { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Verticrane 기록기</h1>
+  <nav>
+    <a href="{{ url_for('index') }}">상태</a>
+    <a href="{{ url_for('settings') }}">설정</a>
+  </nav>
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>

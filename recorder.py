@@ -32,6 +32,7 @@ from loguru import logger
 
 import ahrs_file as af
 import app_config
+import filestore
 import port_config
 import read_status
 import stability
@@ -277,6 +278,8 @@ class Recorder:
         self.status = Status()
         self.stop_event = threading.Event()
         self._http_seen = threading.Event()
+        self._want_start = threading.Event()
+        self._want_stop = threading.Event()
         self._lock = threading.Lock()
         self.fail_on_no_sensor: bool = fail_on_no_sensor
 
@@ -295,6 +298,7 @@ class Recorder:
         self._next_time_save: float = 0.0
         self._next_ntp_check: float = 0.0
         self._since_judged: int = 0
+        self._next_purge: float = 0.0
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
         logger.info("Boot #{} in {}", self.boot_count, self.data_dir)
@@ -306,6 +310,23 @@ class Recorder:
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
+
+    def request_manual_start(self) -> bool:
+        """Web asked to record now. Still waits for the sensor to settle.
+
+        The settle wait is not skipped: starting mid-swing would put unusable
+        data at the head of the file, which section 4 forbids outright.
+        """
+        if self.state in (RECORDING, WAITING_STABLE):
+            return False
+        self._want_start.set()
+        return True
+
+    def request_manual_stop(self) -> bool:
+        if self.state != RECORDING:
+            return False
+        self._want_stop.set()
+        return True
 
     def snapshot(self) -> Status:
         with self._lock:
@@ -392,6 +413,25 @@ class Recorder:
         if now_mono >= self._next_time_save:
             self._next_time_save = now_mono + float(self.cfg["time_save_interval_seconds"])
             self.time.save_last_known()
+
+        if now_mono >= self._next_purge:
+            self._next_purge = now_mono + 3600.0
+            filestore.purge_trash(self.data_dir, float(self.cfg["trash_retention_days"]))
+
+        # Manual control arrives as a flag rather than a direct call: the web
+        # runs on another thread, and only this one may touch the open writer.
+        if self._want_stop.is_set():
+            self._want_stop.clear()
+            if self.state == RECORDING:
+                logger.info("Stop requested from the web")
+                self._stop_recording()
+                self._set_state(MAINTENANCE)
+        if self._want_start.is_set():
+            self._want_start.clear()
+            if self.state not in (RECORDING, WAITING_STABLE):
+                logger.info("Start requested from the web")
+                self.monitor.reset()
+                self._set_state(WAITING_STABLE)
 
         if self.state == MAINTENANCE:
             # Idle on purpose: someone is here to collect files, so do not add
@@ -612,6 +652,15 @@ class Recorder:
         free: float = _free_mb(self.data_dir)
         if free >= float(self.cfg["min_free_mb"]):
             return
+        # Files already collected are the cheapest thing to give up; losing the
+        # recording is the expensive outcome (section 11).
+        needed: int = int((float(self.cfg["min_free_mb"]) - free) * 1024 * 1024)
+        purged: int = filestore.purge_trash(
+            self.data_dir, float(self.cfg["trash_retention_days"]), max(needed, 0))
+        if purged and _free_mb(self.data_dir) >= float(self.cfg["min_free_mb"]):
+            logger.warning("Freed space by purging {} trashed file(s)", purged)
+            return
+
         logger.error("Only {:.0f} MB free (< {} MB); stopping the recording",
                      free, self.cfg["min_free_mb"])
         self.status.error = "디스크 여유 부족"
@@ -652,14 +701,29 @@ def main() -> int:
     parser.add_argument("--data-dir", default=DATA_DIR)
     parser.add_argument("--require-sensor", action="store_true",
                         help="Exit non-zero if the sensor cannot be reached.")
+    parser.add_argument("--no-web", action="store_true",
+                        help="Do not start the HTTP server.")
+    parser.add_argument("--port-http", type=int, help="Override http_port.")
     args = parser.parse_args()
 
     cfg: dict[str, Any] = app_config.load()["recorder"]
     if args.http_wait is not None:
         cfg["http_wait_seconds"] = args.http_wait
 
+    if args.port_http is not None:
+        cfg["http_port"] = args.port_http
+
     rec = Recorder(port_config.resolve_port(args.port), cfg, args.data_dir,
                    fail_on_no_sensor=args.require_sensor)
+
+    if not args.no_web:
+        try:
+            import web
+            web.serve(rec, os.path.abspath(args.data_dir), cfg)
+        except ImportError as exc:
+            # No Flask on this machine: keep recording rather than refusing to
+            # start. The measurement matters more than the web page.
+            logger.error("Web interface unavailable ({}); recording anyway", exc)
 
     # systemd sends SIGTERM on stop; finish the current block rather than
     # leaving a torn tail for the next boot to trim.
