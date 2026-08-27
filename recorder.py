@@ -51,10 +51,18 @@ SERIAL_REG: tuple[int, int] = (0x7F, 6)
 # Checked once per connection. Getting any of these wrong silently changes what
 # the recorded angles mean, so it is worth saying so at the time rather than
 # leaving the evidence in a file nobody reads until the measurement is over.
-EXPECTED_CONFIG: dict[int, tuple[str, int]] = {
-    0x23: ("설치 방향", 0),      # horizontal
-    0x24: ("알고리즘", 1),       # 6-axis: magnetic interference stays out of attitude
-    0x1F: ("대역폭", 4),         # 10 Hz, which 25 Hz sampling assumes
+#
+# The third column names the value, because a warning that only prints raw
+# numbers is one nobody can act on -- and an expectation set to the wrong number
+# teaches people to ignore the warning altogether.
+EXPECTED_CONFIG: dict[int, tuple[str, int, dict[int, str]]] = {
+    0x23: ("설치 방향", 0, {0: "수평", 1: "수직"}),
+    # 6-axis keeps magnetic interference out of the attitude solution. A crane is
+    # steel and motors, so the magnetometer cannot be trusted for heading.
+    0x24: ("알고리즘", 1, {0: "9축", 1: "6축"}),
+    # 10 Hz, not the factory default of 20 Hz. Sampling at 25 Hz assumes it:
+    # anything faster aliases vibration down into the slow tilt band (section 1).
+    0x1F: ("대역폭", 5, {3: "42 Hz", 4: "20 Hz", 5: "10 Hz", 6: "5 Hz"}),
 }
 
 # States, per section 3.
@@ -235,7 +243,7 @@ class SensorLink:
         warnings: list[str] = []
         if self.device is None:
             return warnings
-        for reg, (label, expected) in EXPECTED_CONFIG.items():
+        for reg, (label, expected, names) in EXPECTED_CONFIG.items():
             try:
                 if self.device.readReg(reg, 1) is None:
                     continue
@@ -243,10 +251,11 @@ class SensorLink:
                 continue
             actual: Optional[int] = self.device.registerData.get(reg)
             if actual is not None and actual != expected:
-                msg: str = "{0} 설정이 다릅니다 (0x{1:02X}: {2} != 기대 {3})".format(
-                    label, reg, actual, expected)
+                msg: str = "{0}이(가) {1}입니다. {2}이어야 합니다 (0x{3:02X})".format(
+                    label, names.get(actual, str(actual)),
+                    names.get(expected, str(expected)), reg)
                 warnings.append(msg)
-                logger.warning("{}  -- configure_sensor.py 를 실행하세요", msg)
+                logger.warning("{}  -- dev/configure_sensor.py 를 실행하세요", msg)
         if not warnings:
             logger.info("Sensor configuration matches expectations")
         return warnings
