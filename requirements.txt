@@ -11,6 +11,10 @@ loguru>=0.7
 # Operator web interface (recorder.py serves it on port 8080)
 flask>=3.0
 
+# BLE Wi-Fi provisioning (bt/) -- needs apt's python3-dbus and python3-gi first,
+# which pip cannot build. Only required if bt/ is deployed; see bt/INTEGRATION.md.
+# bluezero==0.9.1
+
 # Analysis dashboard (dashboard.py) -- developer only, not started by systemd
 streamlit>=1.58
 plotly>=6.8

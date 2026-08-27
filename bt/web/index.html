@@ -1,0 +1,1588 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pi Wi-Fi 설정 — BLE 프로비저닝</title>
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <style>
+    /* =====================================================================
+       디자인 토큰 — 다크가 기본, 라이트는 prefers-color-scheme 로 덮어쓴다.
+       ===================================================================== */
+    :root {
+      /* 예전 다크 팔레트를 전체적으로 한 단계 밝게 올린 값 */
+      --bg: #0a1020;
+      --bg-glow: #16233d;
+      --surface: #222d45;
+      --surface-2: #2c3855;
+      --line: #4a5c85;
+      --line-soft: #38466a;
+      --text: #f2f5ff;
+      --text-dim: #b6c2dc;
+      --text-faint: #94a1bd;
+      --accent: #74a6ff;
+      --accent-strong: #4d87f5;
+      --accent-soft: rgba(116, 166, 255, .18);
+      --ok: #4ce4a4;
+      --err: #ff8080;
+      --warn: #ffd166;
+      --shadow: 0 1px 2px rgba(0,0,0,.22), 0 10px 26px -14px rgba(0,0,0,.5);
+      /* 라운드 스케일 — 역할별로 이 넷만 쓴다 (원형은 50%) */
+      --r-card: 14px;   /* 패널·경고 박스 등 최상위 블록 */
+      --r-ctl:  10px;   /* 버튼·입력·로그·상태 배너 */
+      --r-sm:    8px;   /* 작은 버튼·목록 행·입력 안쪽 버튼 */
+      --r-pill: 999px;  /* 배지·알약 */
+      --r-xs:    2px;   /* 신호 막대 같은 미세 요소 */
+      /* Pretendard 를 이름으로만 부른다. 설치돼 있으면 그것이 쓰이고, 없으면
+         뒤의 시스템 글꼴로 떨어진다. 2 MB 폰트 파일을 이 저장소에 넣지 않기
+         위해서이며, 한글이 안 나오는 경우는 없다. */
+      --ko: "Pretendard Variable", Pretendard, system-ui, -apple-system,
+            "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #e4e9f3;
+        --bg-glow: #d2e0ff;
+        --surface: #ffffff;
+        --surface-2: #f4f7fd;
+        --line: #c3cde0;
+        --line-soft: #dbe2ee;
+        --text: #111a2e;
+        --text-dim: #5a6884;
+        --text-faint: #737f96;
+        --accent: #2563eb;
+        --accent-strong: #1d4ed8;
+        --accent-soft: rgba(37, 99, 235, .09);
+        --ok: #059669;
+        --err: #dc2626;
+        --warn: #b45309;
+        --shadow: 0 1px 2px rgba(16,24,40,.05), 0 12px 28px -16px rgba(16,24,40,.28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font: 15px/1.35 var(--ko);
+      color: var(--text);
+      background:
+        radial-gradient(900px 500px at 50% -10%, var(--bg-glow), transparent 70%),
+        var(--bg);
+      background-attachment: fixed;
+      display: flex; justify-content: center;
+      padding: 22px 16px 40px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .app { width: 100%; max-width: 520px; }
+
+    /* ---------- 헤더 ---------- */
+    .plate { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .plate .id { flex: 1; min-width: 0; }
+    .plate h1 { font-size: 1.08rem; margin: 0; letter-spacing: -.01em; }
+    .screw {
+      width: 40px; height: 40px; border-radius: var(--r-ctl); flex: none;
+      display: grid; place-items: center;
+      background: linear-gradient(150deg, var(--accent), var(--accent-strong));
+      box-shadow: 0 6px 18px -8px var(--accent-strong);
+      color: #fff;
+    }
+    .screw svg { width: 20px; height: 20px; }
+
+    /* 장비 상태 pill */
+    .plate .device {
+      display: inline-flex; align-items: center; gap: 8px; margin-top: 6px;
+      padding: 5px 12px 5px 10px; border-radius: var(--r-pill);
+      background: var(--surface); border: 1px solid var(--line);
+      font-size: .8rem; font-weight: 600; color: var(--text-dim);
+      max-width: 100%; overflow: hidden;
+    }
+    .plate .device span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ---------- LINK 램프 ----------
+       장비가 2초마다 보내는 하트비트에 맞춰 실제로 점멸한다.
+       화면이 '연결됨'인데 램프가 안 뛰면 데이터가 멈춘 것이다. */
+    .lamp {
+      width: 9px; height: 9px; border-radius: 50%; flex: none; position: relative;
+      background: var(--text-faint);
+      transition: background .2s ease-out, box-shadow .2s ease-out;
+    }
+    .lamp.live { background: color-mix(in srgb, var(--ok) 55%, transparent); }
+    .lamp.live.beat {
+      background: var(--ok);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent);
+      transition: none;
+    }
+
+    /* ---------- 카드 ---------- */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--r-card);
+      box-shadow: var(--shadow);
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .panel > .body { padding: 16px; }
+    .panel > .head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 14px 16px 0;
+    }
+    .legend, .legend-ko {
+      font-size: .74rem; font-weight: 700; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--text-faint);
+    }
+
+    /* ---------- 현재 네트워크(히어로) ---------- */
+    .readout { padding: 14px 16px 16px; }
+    .readout .value {
+      font: 700 2.05rem/1.15 var(--mono);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.02em; margin-top: 4px; word-break: break-all;
+      background: linear-gradient(100deg, var(--text), var(--accent) 130%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .readout .value.idle {
+      font-size: 1.05rem; font-weight: 500; color: var(--text-faint);
+      background: none; -webkit-text-fill-color: currentColor;
+    }
+    .scribe { display: none; }
+    .rows {
+      display: grid; grid-template-columns: 76px 1fr; gap: 2px 14px;
+      margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line);
+      font-size: .81rem; line-height: 1.3;
+    }
+    .rows dt { color: var(--text-faint); padding: 3px 0; }
+    .rows dd {
+      margin: 0; padding: 3px 0; color: var(--text-dim);
+      font-family: var(--mono); font-variant-numeric: tabular-nums; word-break: break-all;
+    }
+    .rows dd.live { color: var(--ok); font-weight: 600; }
+    #curSsid { font-family: var(--ko); }
+
+    /* 장비와 끊긴 동안의 Wi-Fi 정보는 '지금' 이 아니라 '마지막으로 본' 값이다.
+       지우면 방금 받은 IP 를 잃고, 그대로 두면 거짓말이 된다 — 그래서 흐리게
+       낮추고 언제 기준인지 함께 적는다. */
+    .readout.stale .value, .readout.stale .rows { opacity: .5; }
+    .readout.stale .rows dd.live { color: var(--text-dim); font-weight: 400; }
+    .stale-note {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 10px; padding: 7px 10px; border-radius: 8px;
+      background: color-mix(in srgb, var(--warn) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+      color: var(--text-dim); font-size: .78rem; line-height: 1.35;
+    }
+    .stale-note::before { content: "⏱"; opacity: .8; }
+
+    /* ---------- 버튼 ---------- */
+    button {
+      font: inherit; font-weight: 600; font-size: .9rem; cursor: pointer;
+      border-radius: var(--r-ctl); border: 1px solid transparent;
+      padding: 10px 16px; background: var(--accent); color: #fff;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      transition: filter .15s, background .15s, border-color .15s, transform .06s;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button.line {
+      background: var(--surface-2); color: var(--text); border-color: var(--line);
+    }
+    button.line:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+    button.text {
+      background: transparent; border-color: transparent; color: var(--text-dim);
+      padding: 6px 10px; font-size: .78rem;
+    }
+    button.text:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+    button.sm { padding: 7px 13px; font-size: .8rem; border-radius: var(--r-sm); }
+    button.block { width: 100%; padding: 12px 16px; font-size: .95rem; }
+    button:disabled { opacity: .42; cursor: not-allowed; }
+    button.loading { pointer-events: none; opacity: .75; }
+    /* 진행 중이어도 눌러서 취소·재선택할 수 있는 버튼(연결 시도 중의 '연결') */
+    button.loading.cancelable { pointer-events: auto; }
+    button.loading::before {
+      content: ""; width: 13px; height: 13px; border-radius: 50%; flex: none;
+      border: 2px solid currentColor; border-top-color: transparent;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---------- 입력 ---------- */
+    .field { position: relative; display: flex; }
+    input[type=text], input[type=password] {
+      width: 100%; font: inherit; font-size: .92rem;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--line); border-radius: var(--r-ctl);
+      padding: 11px 13px; transition: border-color .15s, box-shadow .15s;
+    }
+    input::placeholder { color: var(--text-faint); }
+    input:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    input:disabled { opacity: .55; }
+    .field .inside {
+      position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+      padding: 5px 10px; font-size: .75rem; border-radius: var(--r-sm);
+      background: transparent; color: var(--text-dim); border: 0;
+    }
+    .field .inside:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+    .check {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: .83rem; color: var(--text-dim); cursor: pointer; user-select: none;
+    }
+    .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+    /* ---------- SSID 목록 ---------- */
+    #nets, #devs { max-height: 268px; overflow-y: auto; padding: 4px 10px 10px; }
+    #nets::-webkit-scrollbar, #devs::-webkit-scrollbar { width: 8px; }
+    #nets::-webkit-scrollbar-thumb, #devs::-webkit-scrollbar-thumb {
+      background: var(--line); border-radius: var(--r-pill);
+    }
+    /* 장비 카드: 이름 아래에 '언제·어떤 IP 였는지' 를 적어 같은 모델이 여러 대
+       있어도 어느 장비인지 알아볼 수 있게 한다. */
+    .net .sub {
+      display: block; margin-top: 2px;
+      font: 500 .72rem/1.2 var(--mono); color: var(--text-faint);
+    }
+    .net.busy { opacity: .5; }
+    .net {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      background: transparent; color: var(--text);
+      border: 1px solid transparent; border-radius: var(--r-sm);
+      padding: 6px 10px; margin-bottom: 0;
+      font: 500 .9rem/1.15 var(--ko); text-align: left;
+      transition: background .13s, border-color .13s;
+    }
+    .net:hover { background: var(--surface-2); filter: none; }
+    .net:active { transform: none; }
+    .net.sel {
+      background: var(--accent-soft);
+      border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+    .net .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .net .now, .net .sec {
+      font-size: .67rem; font-weight: 700; flex: none;
+      border-radius: var(--r-pill); border: 1px solid;
+      /* 위 4 / 아래 2 — 한글은 디센더가 없어 대칭 패딩이면 위로 붙어 보인다 */
+      padding: 4px 8px 2px; line-height: 1;
+    }
+    .net .now {
+      color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+      background: color-mix(in srgb, var(--ok) 12%, transparent);
+    }
+    .net .sec { color: var(--text-dim); border-color: var(--line); }
+    .q { font: 600 .72rem/1 var(--mono); color: var(--text-faint); flex: none; font-variant-numeric: tabular-nums; }
+    .meter { display: flex; align-items: flex-end; gap: 2px; height: 15px; flex: none; }
+    .meter i { width: 3px; background: var(--line); border-radius: var(--r-xs); display: block; }
+    .meter i:nth-child(1) { height: 4px; }
+    .meter i:nth-child(2) { height: 7px; }
+    .meter i:nth-child(3) { height: 10px; }
+    .meter i:nth-child(4) { height: 12px; }
+    .meter i:nth-child(5) { height: 15px; }
+    .meter i.on { background: var(--accent); }
+    .empty {
+      color: var(--text-faint); font-size: .85rem; text-align: center;
+      padding: 26px 10px; border: 1px dashed var(--line); border-radius: var(--r-ctl);
+      margin: 4px 0 2px;
+    }
+    .empty b { color: var(--text-dim); }
+
+    /* ---------- 알림 라인 ---------- */
+    #progress {
+      display: none; align-items: flex-start; gap: 8px;
+      margin-bottom: 14px; padding: 10px 12px; border-radius: var(--r-ctl);
+      font-size: .83rem; line-height: 1.35; word-break: break-word;
+      border: 1px solid; animation: fade .18s ease-out;
+    }
+    #progress.show { display: flex; }
+    #progress::before { font-weight: 700; line-height: 1.3; }
+    #progress.work { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+    #progress.work::before { content: "⋯"; }
+    #progress.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+    #progress.ok::before { content: "✓"; }
+    #progress.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); background: color-mix(in srgb, var(--err) 10%, transparent); }
+    #progress.err::before { content: "!"; }
+    @keyframes fade { from { opacity: 0; transform: translateY(-3px); } }
+
+    .warn-box {
+      background: color-mix(in srgb, var(--err) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+      color: var(--err); border-radius: var(--r-card); padding: 12px 14px;
+      font-size: .84rem; margin-bottom: 14px;
+    }
+
+    /* ---------- 화면 전환 ---------- */
+    .screen[hidden] { display: none; }
+    .screen { animation: slidein .2s ease-out; }
+    @keyframes slidein { from { opacity: 0; transform: translateX(10px); } }
+    #screen-main.screen { animation-name: slideinBack; }
+    @keyframes slideinBack { from { opacity: 0; transform: translateX(-10px); } }
+
+    .back {
+      width: 34px; height: 34px; padding: 0; flex: none; border-radius: var(--r-ctl);
+      font-size: 1rem; line-height: 1;
+    }
+    .detail-head { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+    .detail-head .title {
+      font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .detail-head .sub { font: .72rem/1.3 var(--mono); color: var(--text-faint); margin-top: 3px; letter-spacing: .04em; }
+    .hint { font-size: .78rem; color: var(--text-faint); margin: 0; }
+    .stack > * + * { margin-top: 9px; }
+
+    /* ---------- 로그 ---------- */
+    details summary {
+      cursor: pointer; list-style: none; padding: 14px 16px;
+      font-size: .74rem; font-weight: 700; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--text-faint);
+      display: flex; align-items: center; gap: 6px;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before { content: "▸"; transition: transform .15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    #log {
+      background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--r-ctl);
+      padding: 10px; height: 190px; overflow-y: auto; margin-top: 10px;
+      font: 11.5px/1.45 var(--mono);
+      white-space: pre-wrap; word-break: break-all;
+    }
+    #log::-webkit-scrollbar { width: 8px; }
+    #log::-webkit-scrollbar-thumb { background: var(--line); border-radius: var(--r-pill); }
+    .log-rx { color: var(--ok); }
+    .log-tx { color: var(--accent); }
+    .log-err { color: var(--err); }
+    .log-sys { color: var(--text-faint); }
+
+    .foot {
+      display: flex; justify-content: center; margin-top: 4px;
+      font: .7rem var(--mono); color: var(--text-faint);
+    }
+
+    .row { display: flex; gap: 8px; align-items: center; }
+    .grow { flex: 1; min-width: 0; }
+
+    @media (max-width: 380px) {
+      .readout .value { font-size: 1.7rem; }
+      .rows { grid-template-columns: 68px 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- 명판 -->
+    <div class="plate">
+      <div class="screw" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 7l10 10-5 4V3l5 4L7 17" />
+        </svg>
+      </div>
+      <div class="id">
+        <h1>Pi Wi-Fi 설정</h1>
+        <!-- 장비를 고르기 전에는 보여줄 '연결 상태' 가 없다. 연결됐거나
+             시도 중일 때만 나타난다(syncConnBtns 가 켜고 끈다). -->
+        <div class="device" id="stateChip" hidden>
+          <span id="dot" class="lamp"></span>
+          <span id="state">장비 없음</span>
+        </div>
+      </div>
+      <!-- '장비 목록' 버튼은 없앴다 — 끊기와 하는 일이 같았다(끊고 목록으로).
+           그 자리에는 어느 화면에서나 쓸모 있는 '새 장비 찾기' 를 둔다. -->
+      <div class="row">
+        <button id="findNew" class="sm">+ 새 장비 찾기</button>
+        <button id="disconnect" class="line sm" hidden disabled>끊기</button>
+      </div>
+    </div>
+
+    <div id="unsupported" class="warn-box" hidden>
+      이 브라우저는 Web Bluetooth 를 지원하지 않습니다. 데스크톱·안드로이드
+      <b>Chrome</b> 또는 <b>Edge</b> 에서 <b>https</b> 또는 <b>localhost</b> 로 열어주세요.
+      (iOS Safari 미지원)
+    </div>
+
+    <div id="progress" role="status" aria-live="polite"></div>
+
+    <!-- ===== 화면 0: 장비 목록 ===== -->
+    <!-- 한 현장에 장비가 여러 대라, 어느 장비를 설정할지 먼저 고른다.
+         Web Bluetooth 는 앱이 직접 주변을 스캔할 수 없어서, 목록에 담기는 것은
+         '이 브라우저가 접근 권한을 받은 장비' 들이다. 처음 보는 장비는
+         '새 장비 찾기'(브라우저 선택창)를 한 번 거치면 목록에 들어온다. -->
+    <div id="screen-devices" class="screen">
+      <div class="panel">
+        <div class="head">
+          <span class="legend-ko">장비 선택</span>
+        </div>
+        <div id="devs">
+          <div class="empty"><b>+ 새 장비 찾기</b> 로 장비를 추가하세요.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 화면 1: 리드아웃 + 네트워크 목록 ===== -->
+    <div id="screen-main" class="screen" hidden>
+
+      <div class="panel">
+        <div class="head">
+          <span class="legend-ko">현재 네트워크</span>
+          <div class="row">
+            <button id="copyIp" class="text" disabled>IP 복사</button>
+            <button id="refresh" class="text" disabled>다시 읽기</button>
+          </div>
+        </div>
+        <div class="body">
+          <div id="readout" class="readout">
+          <div id="staleNote" class="stale-note" hidden></div>
+          <span class="legend">IP 주소</span>
+          <div id="ip" class="value idle">—</div>
+          <dl class="rows">
+            <dt>SSID</dt><dd id="curSsid">—</dd>
+            <dt>상태</dt><dd id="wifiState">—</dd>
+            <dt>게이트웨이</dt><dd id="gw">—</dd>
+            <dt>호스트명</dt><dd id="host">—</dd>
+            <dt>MAC</dt><dd id="mac">—</dd>
+          </dl>
+        </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="head">
+          <span class="legend-ko">네트워크 선택</span>
+          <div class="row">
+            <button id="manual" class="text" disabled>직접 입력</button>
+            <button id="scan" class="line sm" disabled>검색</button>
+          </div>
+        </div>
+        <div id="nets">
+          <div class="empty">장비에 연결한 뒤 <b>검색</b> 을 누르세요.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ===== 화면 2: 비밀번호 ===== -->
+    <div id="screen-psk" class="screen" hidden>
+      <div class="panel">
+        <div class="body">
+          <div class="detail-head">
+            <button id="back" class="back line" title="목록으로">←</button>
+            <div class="grow">
+              <div id="pskTitle" class="title">네트워크</div>
+              <div id="pskSub" class="sub">—</div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div id="ssidRow" hidden>
+              <div class="field">
+                <input id="ssid" type="text" placeholder="SSID" autocomplete="off" />
+              </div>
+              <label class="check" style="margin-top: 10px;">
+                <input id="hidden" type="checkbox" /> SSID 를 방송하지 않는 네트워크
+              </label>
+            </div>
+
+            <div class="field">
+              <input id="psk" type="password" placeholder="비밀번호" autocomplete="off" />
+              <button id="reveal" class="inside">표시</button>
+            </div>
+            <p id="pskHint" class="hint"></p>
+
+            <button id="join" class="block" disabled>연결</button>
+            <div class="row">
+              <span class="grow"></span>
+              <button id="forget" class="text" disabled>저장된 설정 삭제</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 로그는 어느 화면에서든 보여야 한다. 화면 안에 두면 연결에 실패해
+         목록으로 되돌아왔을 때, 정작 원인이 적힌 로그가 같이 사라진다. -->
+    <div class="panel">
+      <details>
+        <summary>Log</summary>
+        <div class="body" style="padding-top: 12px;">
+          <div class="row">
+            <div class="field grow">
+              <input id="raw" type="text" placeholder="원시 문자열 전송(디버그)" disabled />
+            </div>
+            <button id="send" class="line sm" disabled>전송</button>
+            <button id="clear" class="text">비우기</button>
+          </div>
+          <div id="log"></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="foot">
+      <span id="version">·</span>
+    </div>
+  </div>
+
+  <script>
+    // 앱 버전 — index.html 을 고칠 때마다 올린다(화면 하단·로그에 표시).
+    // sw.js 의 CACHE 버전과 함께 올려야 설치된 PWA 에 갱신이 반영된다.
+    const APP_VERSION = "2026-08-11.25";
+    const PROTO_VERSION = 4;   // ble_peripheral.py 의 PROTO_VERSION 과 맞출 것
+
+    // Nordic UART Service (NUS) — Web Bluetooth 는 소문자 UUID 사용
+    const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const NUS_RX_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // 호스트 -> Pi (Write)
+    const NUS_TX_CHAR = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // Pi -> 호스트 (Notify)
+
+    // 한 번에 실어보낼 바이트 수. ATT MTU 협상 결과와 무관하게 안전한 값.
+    // Pi 쪽 CHUNK 와 같아야 할 필요는 없지만(줄 단위로 조립) 맞춰 둔다.
+    const CHUNK = 20;
+
+    const $ = (id) => document.getElementById(id);
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    let device = null, rxChar = null, txChar = null;
+    let userDisconnect = false;  // 사용자가 직접 해제했는지(자동 재연결 억제용)
+    let busy = false;            // 연결 시도 중복 방지(버튼·자동연결·재연결 루프 겹침 방지)
+    let netList = [];            // 마지막 스캔 결과
+    let selectedSsid = "";
+    let pending = null;          // 진행 중인 명령 {cmd, resolve, reject, timer}
+
+    // 비밀번호 칸의 상태
+    //   none   = 사용자가 직접 입력한(또는 빈) 값
+    //   masked = 장비에 저장된 비밀번호를 길이만큼 ● 로 채워둔 상태(실제 값 아님)
+    //   real   = [표시] 로 장비에서 실제 값을 받아온 상태
+    let pskState = "none";
+    let lastSecret = null;       // 장비가 보내준 {ssid, psk} (표시 요청의 응답)
+    let deviceLabel = null;      // 장비가 hello 로 알려준 진짜 이름
+
+    function log(msg, cls = "log-sys") {
+      const el = $("log");
+      const time = new Date().toLocaleTimeString();
+      const line = document.createElement("div");
+      line.className = cls;
+      line.textContent = `[${time}] ${msg}`;
+      el.appendChild(line);
+      while (el.childElementCount > 500) el.removeChild(el.firstChild);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // 상태 한 줄. kind: work(진행) | ok | err | "" (숨김)
+    // 성공 메시지는 잠시 뒤 스스로 사라진다 — 화면에 남아 지금 상황과
+    // 안 맞는 옛 메시지가 되는 걸 막기 위함.
+    let progressTimer = null;
+    function setProgress(msg, kind = "work") {
+      const el = $("progress");
+      clearTimeout(progressTimer);
+      el.textContent = msg || "";
+      el.className = msg ? `show ${kind}` : "";
+      if (msg && kind === "ok") {
+        progressTimer = setTimeout(() => setProgress(""), 6000);
+      }
+    }
+
+    // 버튼에 스피너를 걸고 잠근다(작업 중 시각 피드백).
+    function setBusyBtn(id, on, label) {
+      const btn = $(id);
+      if (on) {
+        btn.dataset.label = btn.dataset.label || btn.textContent;
+        btn.classList.add("loading");
+        if (label) btn.textContent = label;
+      } else {
+        btn.classList.remove("loading");
+        if (btn.dataset.label) btn.textContent = btn.dataset.label;
+      }
+    }
+
+    // 화면 전환: "devices"(장비 목록) → "main"(상태 + SSID 목록) ⇄ "psk"(비밀번호)
+    function showScreen(name) {
+      $("screen-devices").hidden = name !== "devices";
+      $("screen-main").hidden = name !== "main";
+      $("screen-psk").hidden = name !== "psk";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // 버튼의 모양·활성 여부는 전부 여기서 busy/retrying/연결여부로부터 파생된다.
+    // 어느 한 곳에서라도 따로 켜고 끄면, 취소처럼 흐름이 중간에 잘리는 경우에
+    // 되돌리는 코드가 실행되지 않아 스피너가 남고 버튼이 영영 안 눌린다.
+    // 특히 장비가 꺼져 있으면 시도가 끝없이 이어지므로, 그동안에도 '중단' 과
+    // 목록 이동은 반드시 살아 있어야 한다(갇히지 않게).
+    function syncConnBtns() {
+      const on = !!device?.gatt?.connected;
+      const trying = (busy || retrying) && !on;
+      // 아무 장비와도 엮여 있지 않으면 상단의 연결 관련 표시를 아예 감춘다.
+      // 끊을 것도 돌아갈 곳도 없는데 버튼만 회색으로 떠 있으면 화면이 거짓말을 한다.
+      const idle = !on && !trying;
+      $("stateChip").hidden = idle;      // 고른 장비가 없으면 연결 상태도 없다
+      $("disconnect").hidden = idle;
+      $("disconnect").disabled = idle;   // 숨김과 별개로 동작도 막아 둔다
+      $("disconnect").textContent = trying ? "중단" : "끊기";
+      $("findNew").disabled = trying;    // 시도 중에는 '중단' 이 먼저다
+      for (const card of devCards) card.classList.toggle("busy", trying);
+    }
+
+    // BLE 링크 상태에 따라 조작 가능한 것들을 켜고 끈다.
+    function setConnected(on) {
+      $("dot").className = "lamp" + (on ? " live" : "");
+      if (!on) deviceLabel = null;
+      $("state").textContent = on
+        ? (deviceLabel || device?.name || "장비 연결됨")
+        : "장비 없음";
+      syncConnBtns();
+      for (const id of ["scan", "refresh", "manual", "ssid", "psk", "reveal", "hidden", "raw", "send"]) {
+        $(id).disabled = !on;
+      }
+      $("join").disabled = !on || !$("ssid").value.trim();
+      $("forget").disabled = $("join").disabled;
+      if (on) {
+        // 붙자마자 장비가 상태를 보내 주지만, 그게 도착하기 전까지 화면의 값은
+        // 여전히 옛것이다. 도착하면 renderStatus 가 안내를 지운다.
+        if (lastStatus) markStale(true, "reading");
+      }
+      if (!on) {
+        // 끊겼다고 IP 복사까지 막지는 않는다 — 방금 받아 낸 IP 를 적어 두는 게
+        // 이 앱의 목적이고, 값이 옛것이라는 사실은 아래 안내로 밝힌다.
+        $("copyIp").disabled = !lastStatus?.ip;
+        markStale(!!lastStatus);   // 받아 둔 정보가 있을 때만 안내를 띄운다
+        setProgress("");
+        showScreen("main");  // 장비가 끊기면 입력 화면에 갇히지 않게 목록으로
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 프레이밍: JSON 한 줄 + '\n' 을 CHUNK 바이트씩 쪼개 전송 / 조립 수신
+    // -----------------------------------------------------------------------
+    let writeChain = Promise.resolve();  // 쓰기는 반드시 직렬화(동시 GATT 작업 금지)
+
+    // 쓰기가 이 시간을 넘기면 링크가 죽은 것으로 본다. Web Bluetooth 는
+    // 타임아웃이 없어서, 어중간하게 끊긴 링크에 쓰면 영원히 pending 이 된다.
+    const WRITE_TIMEOUT_MS = 3000;
+
+    // 모든 호스트 -> 장비 전송이 지나는 유일한 통로. 여기서 시간제한을 걸어야
+    // keepalive 뿐 아니라 scan·connect 같은 명령도 같은 보호를 받는다.
+    function writeLine(obj) {
+      const data = enc.encode(JSON.stringify(obj) + "\n");
+      const task = withTimeout(writeChain.then(async () => {
+        if (!rxChar) throw new Error("장비에 연결되어 있지 않습니다.");
+        for (let i = 0; i < data.length; i += CHUNK) {
+          const part = data.slice(i, i + CHUNK);
+          try {
+            await rxChar.writeValueWithResponse(part);
+          } catch {
+            await rxChar.writeValueWithoutResponse(part);
+          }
+        }
+      }), WRITE_TIMEOUT_MS, "전송");
+      // 한 번 실패해도 다음 전송이 막히지 않도록 체인은 항상 이어준다.
+      writeChain = task.catch(() => {});
+      // 쓰기 실패는 곧 링크 사망이다 — 알림 공백(8초)을 기다리지 않고 끊는다.
+      task.catch((e) => dropLink(`전송 실패(${e.message})`));
+      return task;
+    }
+
+    // 명령 하나를 보내고 {"ev":"result","cmd":...} 가 올 때까지 기다린다.
+    function request(obj, timeoutMs = 30000) {
+      if (pending) return Promise.reject(new Error("이전 명령이 아직 진행 중입니다."));
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending = null;
+          reject(new Error(`응답 시간 초과(${timeoutMs / 1000}s)`));
+        }, timeoutMs);
+        pending = { cmd: obj.cmd, resolve, reject, timer };
+        log("→ " + JSON.stringify(obj).replace(/"psk":"[^"]*"/, '"psk":"***"'), "log-tx");
+        writeLine(obj).catch((e) => {
+          clearTimeout(timer);
+          pending = null;
+          reject(e);
+        });
+      });
+    }
+
+    function settlePending(result) {
+      if (!pending || pending.cmd !== result.cmd) return;
+      clearTimeout(pending.timer);
+      const p = pending;
+      pending = null;
+      if (result.ok) p.resolve(result);
+      else p.reject(new Error(result.msg || "실패"));
+    }
+
+    // LINK 램프를 하트비트마다 한 번 깜빡인다. 랜카드 링크 LED 와 같은 뜻:
+    // 램프가 멈추면 화면이 '연결됨'이어도 데이터는 끊긴 것이다.
+    let beatTimer = null;
+    function pulseLamp() {
+      const el = $("dot");
+      if (!el.classList.contains("live")) return;
+      el.classList.add("beat");
+      clearTimeout(beatTimer);
+      beatTimer = setTimeout(() => el.classList.remove("beat"), 170);
+    }
+
+    let rxBuf = "";
+    function onNotify(event) {
+      lastNotifyAt = Date.now();  // 하트비트 갱신
+      rxBuf += dec.decode(event.target.value, { stream: true });
+      let idx;
+      while ((idx = rxBuf.indexOf("\n")) >= 0) {
+        const line = rxBuf.slice(0, idx).trim();
+        rxBuf = rxBuf.slice(idx + 1);
+        if (line) handleMessage(line);
+      }
+      if (rxBuf.length > 16384) rxBuf = "";  // 조립 실패 시 폭주 방지
+    }
+
+    function handleMessage(line) {
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        log("← (파싱 불가) " + line, "log-err");
+        return;
+      }
+      switch (msg.ev) {
+        case "hb":
+          pulseLamp();   // 장비가 살아 있다는 표시 — 램프가 실제로 뛴다
+          return;        // 하트비트는 로그를 더럽히지 않는다.
+        case "hello":
+          // Chrome 은 예전에 본 기기 이름을 캐시해 옛 이름(Pi-BLE-Test)을 줄 때가
+          // 있다. 장비가 스스로 알려준 이름이 항상 맞으므로 그걸로 덮어쓴다.
+          deviceLabel = msg.name || null;
+          // 장비가 스스로 밝힌 이름을 목록에도 반영한다(크롬 캐시 이름 보정).
+          if (deviceLabel) saveMemo(device?.id, { name: deviceLabel });
+          if (device?.gatt?.connected && deviceLabel) $("state").textContent = deviceLabel;
+          log(`← 장비 ${msg.name} (fw ${msg.fw}, proto ${msg.proto})`, "log-rx");
+          if (msg.proto !== PROTO_VERSION) {
+            setProgress(`장비 프로토콜 v${msg.proto} ≠ 앱 v${PROTO_VERSION} — 한쪽을 업데이트하세요.`, "err");
+          }
+          return;
+        case "status":
+          renderStatus(msg);
+          return;
+        case "scan":
+          netList = msg.nets || [];
+          renderNets();
+          return;
+        case "saved":
+          // 저장된 비밀번호가 있으면 그 길이만큼 ● 로 채워 보여준다(값은 안 받음).
+          // 사용자가 이미 뭔가 입력했거나 다른 네트워크로 옮겼으면 무시.
+          if (msg.has && msg.ssid === $("ssid").value.trim()
+              && pskState === "none" && !$("psk").value) {
+            $("psk").value = "•".repeat(msg.len);
+            pskState = "masked";
+          }
+          return;
+        case "secret":
+          lastSecret = msg;   // [표시] 를 기다리는 쪽에서 꺼내 쓴다
+          return;
+        case "progress":
+          setProgress(msg.msg, "work");
+          log("← " + msg.msg, "log-rx");
+          return;
+        case "result":
+          log(`← ${msg.cmd}: ${msg.ok ? "성공" : "실패"} — ${msg.msg}`, msg.ok ? "log-rx" : "log-err");
+          settlePending(msg);
+          return;
+        case "echo":
+          log("← echo: " + msg.msg, "log-rx");
+          return;
+        default:
+          log("← " + line, "log-rx");
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 화면 갱신
+    // -----------------------------------------------------------------------
+    let lastStatus = null;
+    let lastStatusAt = 0;   // 그 정보를 언제 받았는지(장비와 끊긴 뒤 표시용)
+
+    // 장비와 끊겨 있으면 화면의 Wi-Fi 정보는 '지금' 이 아니라 '마지막으로 본'
+    // 값이다. 그대로 두면 끊긴 장비의 옛 IP 를 현재 상태로 읽게 되므로,
+    // 흐리게 낮추고 언제 기준인지 밝힌다. (지워 버리면 방금 받은 IP 를 잃는다.)
+    function markStale(on, mode) {
+      const note = $("staleNote");
+      $("readout").classList.toggle("stale", on);
+      note.hidden = !on;
+      if (!on) return;
+      const at = lastStatusAt
+        ? new Date(lastStatusAt).toLocaleTimeString("ko-KR",
+            { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        : "?";
+      note.textContent = mode === "reading"
+        ? `장비 정보를 다시 읽는 중입니다 — 아래는 ${at} 기준 값입니다.`
+        : `장비와 끊겨 있습니다 — 아래는 ${at} 기준 마지막 확인값입니다.`;
+    }
+
+    function renderStatus(st) {
+      lastStatus = st;
+      lastStatusAt = Date.now();
+      markStale(false);   // 방금 장비에서 받은 값이다
+      // 목록에서 "그 장비가 어느 IP 였는지" 로 알아볼 수 있게 남긴다.
+      saveMemo(device?.id, { ip: st.ip || null, at: Date.now() });
+      const ipEl = $("ip");
+      if (st.ip) {
+        ipEl.textContent = st.ip;
+        ipEl.className = "value";
+        $("copyIp").disabled = false;
+      } else {
+        ipEl.textContent = "주소 없음";
+        ipEl.className = "value idle";
+        $("copyIp").disabled = true;
+      }
+      $("curSsid").textContent = st.ssid || st.profile || "없음";
+      $("wifiState").textContent = st.connected ? "연결됨" : (st.state || "—");
+      $("wifiState").className = st.connected ? "live" : "";
+      $("gw").textContent = st.gateway || "—";
+      $("host").textContent = st.hostname || "—";
+      $("mac").textContent = st.mac || "—";
+      // 현재 붙어 있는 SSID 표시가 목록에도 반영되도록 다시 그린다.
+      renderNets();
+    }
+
+    function renderNets() {
+      const box = $("nets");
+      box.innerHTML = "";
+      if (!netList.length) {
+        const d = document.createElement("div");
+        d.className = "empty";
+        d.innerHTML = device?.gatt?.connected
+          ? "<b>검색</b> 을 눌러 주변 네트워크를 찾으세요."
+          : "먼저 장비에 연결하세요.";
+        box.appendChild(d);
+        return;
+      }
+      for (const n of netList) {
+        const btn = document.createElement("button");
+        btn.className = "net" + (n.s === selectedSsid ? " sel" : "");
+        btn.type = "button";
+
+        // 이름이 먼저 읽혀야 목록을 훑을 수 있다. 계측값은 오른쪽에 모은다.
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = n.s;
+        btn.appendChild(name);
+
+        // 현재 접속 중인 AP 표시. 상태(ev:status)가 스캔 결과(n.c)보다 항상
+        // 최신이므로, 상태를 아는 동안은 그것만 믿는다. 안 그러면 네트워크를
+        // 바꾼 뒤에도 옛 AP 에 '연결됨' 배지가 남는다.
+        const isCurrent = lastStatus
+          ? (lastStatus.connected && lastStatus.ssid === n.s)
+          : !!n.c;
+        if (isCurrent) {
+          const tag = document.createElement("span");
+          tag.className = "now";
+          tag.textContent = "연결됨";
+          btn.appendChild(tag);
+        }
+
+        // 잠긴 망이 기본이다. 모든 행에 'WPA' 를 찍으면 정보가 아니라 소음이 된다.
+        // 예외인 개방망만 표시한다 — 비밀번호 없이 붙는다는 뜻이라 행동이 달라진다.
+        if (!n.k) {
+          const sec = document.createElement("span");
+          sec.className = "sec";
+          sec.textContent = "개방";
+          btn.appendChild(sec);
+        }
+
+        // 신호 세기: 5분할 세그먼트 + 실제 수치(계측기 바 그래프)
+        const q = document.createElement("span");
+        q.className = "q";
+        q.textContent = n.q;
+        btn.appendChild(q);
+
+        const meter = document.createElement("span");
+        meter.className = "meter";
+        meter.title = `신호 ${n.q}%`;
+        const filled = Math.min(5, Math.max(1, Math.round(n.q / 20)));
+        for (let i = 1; i <= 5; i++) {
+          const seg = document.createElement("i");
+          if (i <= filled) seg.className = "on";
+          meter.appendChild(seg);
+        }
+        btn.appendChild(meter);
+
+        btn.addEventListener("click", () => selectNet(n));
+        box.appendChild(btn);
+      }
+    }
+
+    // 목록에서 고르면 → 비밀번호 입력 화면으로 넘어간다(SSID 는 고정).
+    function selectNet(n) {
+      selectedSsid = n.s;
+      $("ssid").value = n.s;
+      $("hidden").checked = false;
+      $("ssidRow").hidden = true;
+      $("pskTitle").textContent = n.s;
+      $("pskSub").textContent = `${n.k ? "WPA" : "OPEN"} · SIGNAL ${n.q}%`;
+      resetPskField(n.k);
+      $("psk").placeholder = n.k ? "비밀번호" : "비밀번호 불필요(개방 네트워크)";
+      setHint(n.k ? "" : "개방 네트워크라 비밀번호가 필요 없습니다.");
+      $("join").disabled = false;
+      $("forget").disabled = false;
+      renderNets();
+      showScreen("psk");
+      // 장비에 저장된 비밀번호가 있으면 길이만 받아와 ● 로 채운다.
+      if (n.k) writeLine({ cmd: "saved", ssid: n.s }).catch(() => {});
+      if (n.k) $("psk").focus();
+    }
+
+    function setHint(text) {
+      $("pskHint").textContent = text;
+      $("pskHint").hidden = !text;
+    }
+
+    // 비밀번호 칸을 빈 상태(가리개 없음)로 되돌린다.
+    function resetPskField(enabled) {
+      const el = $("psk");
+      el.value = "";
+      el.type = "password";
+      el.disabled = !enabled;
+      $("reveal").disabled = !enabled;
+      $("reveal").textContent = "표시";
+      pskState = "none";
+      lastSecret = null;
+    }
+
+    // 목록에 없는(숨겨진) 네트워크를 직접 입력할 때도 같은 화면을 쓴다.
+    function openManual() {
+      selectedSsid = "";
+      $("ssid").value = "";
+      $("hidden").checked = true;
+      $("ssidRow").hidden = false;
+      $("pskTitle").textContent = "네트워크 직접 입력";
+      $("pskSub").textContent = "MANUAL ENTRY";
+      resetPskField(true);
+      $("psk").placeholder = "비밀번호";
+      setHint("SSID 는 대소문자를 구분합니다. 정확히 입력하세요.");
+      $("join").disabled = true;
+      $("forget").disabled = true;
+      renderNets();
+      showScreen("psk");
+      $("ssid").focus();
+    }
+
+    // -----------------------------------------------------------------------
+    // Wi-Fi 명령
+    // -----------------------------------------------------------------------
+    async function doScan() {
+      setBusyBtn("scan", true, "검색 중");
+      setProgress("주변 Wi-Fi 검색 중… (최대 30초)", "work");
+      try {
+        const r = await request({ cmd: "scan" }, 45000);
+        setProgress(r.msg, "ok");
+      } catch (e) {
+        setProgress("검색 실패: " + e.message, "err");
+      } finally {
+        setBusyBtn("scan", false);
+        $("scan").disabled = !device?.gatt?.connected;
+      }
+    }
+
+    async function doRefresh() {
+      try {
+        await writeLine({ cmd: "status" });   // 응답은 ev:status 로 들어온다
+      } catch (e) {
+        setProgress("상태 요청 실패: " + e.message, "err");
+      }
+    }
+
+    async function doJoin() {
+      const ssid = $("ssid").value.trim();
+      if (!ssid) return;
+      // masked = 화면의 ● 는 진짜 값이 아니다. 빈 비밀번호로 보내면 장비가
+      // 저장된 설정으로 붙는다(그게 사용자가 기대하는 동작).
+      const psk = ($("psk").disabled || pskState === "masked") ? "" : $("psk").value;
+      const hidden = $("hidden").checked;
+      setBusyBtn("join", true, "연결 중");
+      setProgress(`'${ssid}' 연결 중… (최대 1분)`, "work");
+      try {
+        const r = await request({ cmd: "connect", ssid, psk, hidden }, 90000);
+        setProgress(r.msg, "ok");
+        $("psk").value = "";
+        showScreen("main");   // 성공했으면 목록/상태 화면으로 돌아간다
+      } catch (e) {
+        setProgress("연결 실패: " + e.message, "err");
+      } finally {
+        setBusyBtn("join", false);
+        $("join").disabled = !device?.gatt?.connected || !$("ssid").value.trim();
+      }
+    }
+
+    async function doForget() {
+      const ssid = $("ssid").value.trim();
+      if (!ssid) return;
+      if (!confirm(`'${ssid}' 의 저장된 Wi-Fi 설정을 지울까요?\n(비밀번호가 바뀐 AP 를 다시 설정할 때 사용)`)) return;
+      setProgress(`'${ssid}' 저장 설정 삭제 중…`, "work");
+      try {
+        const r = await request({ cmd: "forget", ssid }, 30000);
+        setProgress(r.msg, "ok");
+      } catch (e) {
+        setProgress("삭제 실패: " + e.message, "err");
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // BLE 연결 (자동복구 로직)
+    // -----------------------------------------------------------------------
+
+    // 권한을 준(=한 번 선택했던) 장비들. getDevices() 는 Chrome 의
+    // "new permissions backend" 기능이라, 없으면 목록을 만들 수 없고 매번
+    // 선택창을 거쳐야 한다.
+    async function permittedDevices(diag = false) {
+      if (!navigator.bluetooth.getDevices) {
+        if (diag) log("이 브라우저는 getDevices() 미지원 → 목록을 만들 수 없어 매번 선택창이 필요합니다. "
+          + "chrome://flags/#enable-web-bluetooth-new-permissions-backend 를 Enabled 로 바꾸고 재시작하세요.", "log-err");
+        return [];
+      }
+      try {
+        const devices = await navigator.bluetooth.getDevices();
+        const ours = devices.filter((d) => (d.name || "").startsWith("Pi-BLE"));
+        if (diag) log(`getDevices(): 권한 있는 장비 ${ours.length}개`);
+        return ours;
+      } catch (e) {
+        if (diag) log("getDevices() 오류: " + e.message, "log-err");
+        return [];
+      }
+    }
+
+    // 장비별 메모(마지막으로 본 IP·시각). 같은 이름의 장비가 여러 대일 때
+    // 목록에서 어느 것이 어느 것인지 알아보게 하는 용도다.
+    const DEV_MEMO_KEY = "pi-ble-device-memo";
+    function loadMemo() {
+      try { return JSON.parse(localStorage.getItem(DEV_MEMO_KEY)) || {}; }
+      catch { return {}; }
+    }
+    function saveMemo(id, patch) {
+      if (!id) return;
+      const memo = loadMemo();
+      memo[id] = { ...(memo[id] || {}), ...patch };
+      try { localStorage.setItem(DEV_MEMO_KEY, JSON.stringify(memo)); } catch { /* 무시 */ }
+    }
+    function agoText(ts) {
+      if (!ts) return "연결한 적 없음";
+      const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+      if (s < 60) return "방금 전";
+      if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+      if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+      return `${Math.floor(s / 86400)}일 전`;
+    }
+
+    // 장비 목록 화면을 다시 그린다.
+    let devCards = [];
+    async function renderDevices(diag = false) {
+      const box = $("devs");
+      const list = await permittedDevices(diag);
+      const memo = loadMemo();
+      box.innerHTML = "";
+      devCards = [];
+      if (!list.length) {
+        const d = document.createElement("div");
+        d.className = "empty";
+        d.innerHTML = "<b>+ 새 장비 찾기</b> 로 장비를 추가하세요.";
+        box.appendChild(d);
+        return;
+      }
+      for (const dev of list) {
+        const m = memo[dev.id] || {};
+        const btn = document.createElement("button");
+        btn.className = "net";
+        btn.type = "button";
+
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = m.name || dev.name || "이름 없음";
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.textContent = [agoText(m.at), m.ip].filter(Boolean).join(" · ");
+        name.appendChild(sub);
+        btn.appendChild(name);
+
+        if (device && dev.id === device.id && device.gatt?.connected) {
+          const tag = document.createElement("span");
+          tag.className = "now";
+          tag.textContent = "연결됨";
+          btn.appendChild(tag);
+        }
+        btn.addEventListener("click", () => connectTo(dev));
+        box.appendChild(btn);
+        devCards.push(btn);
+      }
+      syncConnBtns();
+    }
+
+    // 기억된 기기는 Chrome 이 최근 광고를 보지 못했으면 gatt.connect() 가
+    // "no longer in range" 로 실패한다. watchAdvertisements() 로 실제 광고를
+    // 한 번 볼 때까지 기다린 뒤 연결하면 이 문제를 피한다.
+    async function waitInRange(dev, timeoutMs = 10000) {
+      if (!dev.watchAdvertisements) return;  // 미지원이면 바로 연결 시도
+      const ac = new AbortController();
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => finish(reject, new Error("범위 내 광고 시간 초과")), timeoutMs);
+        const onAdv = () => finish(resolve);
+        function finish(cb, arg) {
+          clearTimeout(t);
+          dev.removeEventListener("advertisementreceived", onAdv);
+          ac.abort();  // 스캔 중지
+          cb(arg);
+        }
+        // 리스너를 먼저 등록한 뒤 감시를 시작해야, 시작 직후 들어온 광고를 놓치지 않음.
+        dev.addEventListener("advertisementreceived", onAdv);
+        dev.watchAdvertisements({ signal: ac.signal }).catch((e) => finish(reject, e));
+      });
+    }
+
+    // promise 에 시간제한을 건다. gatt.connect()/getPrimaryService() 는
+    // 타임아웃이 없어서, 직전 연결이 어중간하게 끊긴 뒤 호출하면 영원히
+    // pending 으로 매달릴 수 있다(재연결 루프 전체가 갇힘). 그 방지용.
+    function withTimeout(promise, ms, what) {
+      return Promise.race([
+        promise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} 시간 초과(${ms / 1000}s)`)), ms)),
+      ]);
+    }
+
+    // 연결 시도 세대. 사용자가 중단하거나 새 시도를 시작하면 올라간다.
+    // Web Bluetooth 에는 진행 중인 gatt.connect() 를 취소하는 방법이 없으므로,
+    // 옛 시도는 그냥 끝나게 두되 세대가 다르면 그 결과를 화면에 반영하지 않는다.
+    let attemptGen = 0;
+    const stale = (gen) => gen !== attemptGen;
+
+    // 구독까지 마친 '진짜 연결' 이 한 번이라도 성사됐는가. 자동 재연결은 이
+    // 경우에만 돈다 — 연결 시도 자체가 실패한 것을 재연결로 되받으면 무한
+    // 루프가 된다(사용자는 목록에서 다시 고르면 된다).
+    let established = false;
+
+    // 진행 중인 모든 시도를 무효화한다(사용자의 '중단'·'새 장비 선택').
+    function cancelAttempts(reason) {
+      attemptGen++;
+      busy = false;
+      retrying = false;
+      established = false;   // 사용자가 끊었으니 자동 재연결 대상이 아니다
+      rxChar = null;
+      txChar = null;
+      try { device?.gatt?.disconnect(); } catch { /* 무시 */ }
+      if (reason) log(reason, "log-sys");
+      syncConnBtns();
+    }
+
+    // 주어진 device 로 실제 GATT 연결 + 캐릭터리스틱 준비.
+    // busy/retrying 은 부르는 쪽(connectTo·reconnectLoop)이 관리한다 —
+    // 시도의 시작과 끝을 아는 건 그쪽이다.
+    async function attach(dev, gen) {
+      try {
+        // 낡은 핸들을 먼저 버린다 — 이전 연결의 캐릭터리스틱이 남아 있으면
+        // 주기 작업이 그걸로 써 보고 실패해 새 연결을 끊는다.
+        established = false;
+        rxChar = null;
+        txChar = null;
+        device = dev;
+        device.removeEventListener("gattserverdisconnected", onDisconnected);
+        device.addEventListener("gattserverdisconnected", onDisconnected);
+
+        $("state").textContent = "연결 중…";   // 진행 중임을 화면에도 알림
+        // 어느 단계에서 막히는지 로그로 남긴다. 연결 문제는 대부분 "어디서
+        // 멈췄는지" 만 알면 원인이 좁혀진다.
+        const t0 = Date.now();
+        const step = (name) => log(`  ${name} (+${Date.now() - t0}ms)`, "log-sys");
+
+        await waitInRange(device);  // 광고 확인(무팝업 재연결 시 stale 방지)
+        step("광고 확인");
+        if (stale(gen)) throw new Error("중단됨");
+        log(`연결 중: ${device.name}`);
+        try {
+          const server = await withTimeout(device.gatt.connect(), 15000, "GATT 연결");
+          step("GATT 연결");
+          if (stale(gen)) throw new Error("중단됨");
+          const service = await withTimeout(server.getPrimaryService(NUS_SERVICE), 10000, "서비스 검색");
+          step("서비스 검색");
+          rxChar = await withTimeout(service.getCharacteristic(NUS_RX_CHAR), 10000, "RX 검색");
+          txChar = await withTimeout(service.getCharacteristic(NUS_TX_CHAR), 10000, "TX 검색");
+          step("캐릭터리스틱 검색");
+          await withTimeout(txChar.startNotifications(), 10000, "알림 구독");
+          step("알림 구독");
+          if (stale(gen)) throw new Error("중단됨");
+        } catch (e) {
+          // 어중간한 연결을 반드시 정리한다 — 안 하면 장비 쪽에는 '연결됨'
+          // 상태만 남아 아무도 그 장비를 찾지 못한다.
+          // 다만 새 시도가 '같은 장비' 를 이어받았다면 그쪽이 주인이므로 건드리지
+          // 않는다(끊으면 방금 맺은 새 연결을 죽인다).
+          if (!(stale(gen) && dev === device)) {
+            try { dev.gatt.disconnect(); } catch { /* 무시 */ }
+          }
+          throw e;
+        }
+        txChar.addEventListener("characteristicvaluechanged", onNotify);
+        rxBuf = "";
+        writeChain = Promise.resolve();
+        lastNotifyAt = Date.now();  // 워치독 기준점(연결 직후 오탐 방지)
+
+        // 여기까지 왔으면 구독까지 끝난 '진짜 연결' 이다.
+        established = true;
+        // 목록에서 알아볼 수 있게 이름과 사용 시각을 남긴다.
+        saveMemo(device.id, { name: device.name || null, at: Date.now() });
+
+        setConnected(true);
+        // 연결에 성공했으면 그 전에 떠 있던 실패 메시지는 더 이상 사실이 아니다.
+        setProgress("");
+        log("연결 완료. 장비가 곧 현재 상태를 보냅니다.", "log-sys");
+      } finally {
+        // 이미 다른 시도가 시작됐다면 화면 상태는 그쪽이 관리한다.
+        // 실패로 빠져나온 경우 '연결 중…' 표시가 남지 않게 되돌린다.
+        if (!stale(gen) && !device?.gatt?.connected) {
+          $("state").textContent = "장비 연결 안 됨";
+        }
+      }
+    }
+
+    // 목록에서 고른 장비에 연결한다. 자동 연결은 없다 — 언제나 사용자가
+    // 어느 장비를 설정할지 직접 고른다(한 현장에 장비가 여러 대이므로).
+    async function connectTo(dev) {
+      if (busy || retrying) {
+        cancelAttempts("진행 중이던 연결 시도를 중단합니다.");
+      }
+      if (device && device.id !== dev.id && device.gatt?.connected) {
+        log(`${device.name} 연결을 끊고 ${dev.name} 로 옮깁니다.`, "log-sys");
+        try { device.gatt.disconnect(); } catch { /* 무시 */ }
+      }
+      userDisconnect = false;
+      const gen = ++attemptGen;
+      busy = true;
+      syncConnBtns();
+      showScreen("main");   // 진행 상황(연결 중…)이 보이는 화면으로
+      try {
+        log(`연결 시도: ${dev.name || dev.id}`);
+        await attach(dev, gen);
+        renderDevices();    // '연결됨' 표시 갱신
+      } catch (e) {
+        if (stale(gen)) return;
+        log("연결 실패: " + e.message, "log-err");
+        setProgress(`장비 연결 실패: ${e.message} — 장비가 켜져 있는지 확인하세요.`, "err");
+        showScreen("devices");   // 실패하면 목록으로 되돌려 다시 고르게 한다
+      } finally {
+        if (!stale(gen)) {
+          busy = false;
+          syncConnBtns();
+        }
+      }
+    }
+
+    // 처음 보는 장비를 목록에 추가한다. 브라우저 선택창에는 근처에서 광고 중인
+    // Pi-BLE-* 가 모두 뜬다(앱이 직접 스캔할 방법은 없다).
+    async function pickNewDevice() {
+      try {
+        log("새 장비 검색 중… (선택창에서 Pi-BLE-XXXX 를 고르세요)");
+        const dev = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: "Pi-BLE" }],
+          optionalServices: [NUS_SERVICE],
+        });
+        saveMemo(dev.id, { name: dev.name || null });
+        await renderDevices();
+        await connectTo(dev);   // 방금 고른 장비는 바로 연결하는 게 자연스럽다
+      } catch (e) {
+        log("장비 추가 취소/실패: " + e.message, "log-sys");
+      }
+    }
+
+
+    // --- 링크 생존 감시 (양방향) ---
+    // 장비 → 호스트: Pi 가 구독 중 2초마다 hb 를 보낸다. "연결됨" 인데 알림이
+    //   끊기면 좀비 연결이다 — 장비 프로세스만 죽으면 무선 링크는 bluetoothd
+    //   가 쥐고 있어 disconnect 이벤트가 오지 않는다(화면은 '연결됨', 데이터만
+    //   멈춤). 이때는 호스트가 스스로 끊어 자동 재연결 루프를 태운다.
+    const HEARTBEAT_TIMEOUT_MS = 8000;
+    let lastNotifyAt = 0;
+
+    // 링크를 죽은 것으로 판정했을 때 지나는 유일한 통로.
+    function dropLink(reason) {
+      if (userDisconnect || !device?.gatt?.connected) return;
+      lastNotifyAt = 0;
+      log(`${reason} → 연결을 끊고 재연결합니다.`, "log-err");
+      device.gatt.disconnect();  // → onDisconnected → reconnectLoop
+    }
+
+    // 호스트 → 장비(keepalive): 1초마다 ping 을 흘려 장비의 RX 워치독(5초)을
+    //   먹여 준다. 장비가 끊김을 모르면 광고가 꺼진 채로 남아 아무도 그 장비를
+    //   찾지 못하기 때문이다. 장비는 답하지 않는다 — 쓰기가 성공한 것 자체가
+    //   링크 생존의 증거다. 실패 처리는 writeLine 안의 dropLink 가 맡는다.
+    const KEEPALIVE_MS = 1000;
+    let kaBusy = false;  // 앞선 keepalive 가 매달려 있으면 겹쳐 보내지 않는다
+    // 양방향 감시를 한 타이머에서 함께 본다 — 판정 주기가 어긋나지 않는다.
+    setInterval(() => {
+      // established 가 핵심 조건이다. 연결이 완성되기 전(서비스·구독 준비 중)에
+      // 돌면, 직전 연결에서 남은 낡은 rxChar 로 ping 을 써서 실패하고, 그 실패를
+      // 링크 사망으로 판정해 방금 맺은 새 연결을 스스로 끊어 버린다.
+      if (!established || userDisconnect || !device?.gatt?.connected) return;
+      // 1) 장비 → 호스트: 하트비트가 끊겼는가
+      if (lastNotifyAt && Date.now() - lastNotifyAt > HEARTBEAT_TIMEOUT_MS) {
+        dropLink(`하트비트 ${HEARTBEAT_TIMEOUT_MS / 1000}초 없음(좀비 연결)`);
+        return;
+      }
+      // 2) 호스트 → 장비: 살아 있다고 알린다
+      if (kaBusy || !rxChar) return;
+      kaBusy = true;
+      writeLine({ cmd: "ping" })
+        .catch(() => { /* 실패 처리는 writeLine 안의 dropLink 가 이미 했다 */ })
+        .finally(() => { kaBusy = false; });
+    }, KEEPALIVE_MS);
+
+    async function onDisconnected() {
+      rxChar = null;   // 끊긴 링크의 캐릭터리스틱을 들고 있으면 안 된다
+      txChar = null;
+      setConnected(false);
+      // 진행 중이던 명령이 있으면 매달리지 않게 정리한다.
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("연결이 끊겼습니다."));
+        pending = null;
+      }
+      setBusyBtn("scan", false);
+      setBusyBtn("join", false);
+      // 사용자가 해제 버튼으로 끊은 경우 — 자동 재연결하지 않음.
+      if (userDisconnect) {
+        log("연결 해제 완료 (사용자 요청).", "log-sys");
+        return;
+      }
+      // 연결을 맺어 보지도 못하고 실패한 경우 — 재연결 루프를 돌리지 않는다.
+      // (attach 가 실패를 정리하며 disconnect() 를 부르면 이 콜백이 그대로
+      //  불리는데, 여기서 루프를 태우면 '붙었다 끊기기' 를 끝없이 반복한다.
+      //  실패했으면 목록에서 사용자가 다시 고르는 것이 이 앱의 규칙이다.)
+      if (!established) {
+        log("연결에 실패했습니다 — 장비 목록에서 다시 선택하세요.", "log-err");
+        return;
+      }
+      // 정상 작업 중이던 연결이 끊긴 경우만 자동 재연결(범위 벗어남·장비 재시작 등).
+      established = false;
+      log("연결이 예기치 않게 끊겼습니다.", "log-err");
+      reconnectLoop();
+    }
+
+    // 사용자가 해제할 때까지 계속 재시도(백오프 1.5s → 최대 10s).
+    // 화면이 꺼지거나 백그라운드로 가면 루프를 멈추고,
+    // 화면에 돌아올 때 visibilitychange 가 이 루프를 다시 태운다.
+    let retrying = false;  // 재연결 루프 중복 방지
+    async function reconnectLoop() {
+      if (retrying || !device) return;
+      const gen = ++attemptGen;
+      retrying = true;
+      syncConnBtns();  // 재연결 도는 동안에도 '중단' 을 누를 수 있어야 한다
+      try {
+        let delay = 1500;
+        for (let i = 1; !userDisconnect && !stale(gen); i++) {
+          if (document.hidden) {
+            log("화면 꺼짐/백그라운드 — 화면에 돌아오면 재연결을 재개합니다.", "log-sys");
+            return;
+          }
+          await new Promise((r) => setTimeout(r, delay));
+          if (userDisconnect || stale(gen) || device.gatt.connected) return;
+          try {
+            log(`자동 재연결 시도 ${i}…`);
+            await attach(device, gen);
+            return;  // 성공하면 종료
+          } catch {
+            delay = Math.min(delay * 1.5, 10000);  // 실패할수록 간격을 늘림
+          }
+        }
+      } finally {
+        if (!stale(gen)) {
+          retrying = false;
+          syncConnBtns();
+        }
+      }
+    }
+
+    // 페이지 로드·화면 복귀 시의 자동 연결은 두지 않는다. 한 현장에 장비가
+    // 여러 대라, 앱이 마음대로 예전 장비에 붙으면 엉뚱한 장비를 설정하게 된다.
+    // 자동 재연결은 "지금 사용자가 고른 장비" 가 작업 도중 끊겼을 때만 돈다
+    // (reconnectLoop). 목록으로 나가면 그것도 멈춘다.
+
+    // 연결됐을 때는 '끊기', 시도 중일 때는 '중단' 으로 동작하는 한 버튼.
+    function disconnect() {
+      const wasTrying = (busy || retrying) && !device?.gatt?.connected;
+      userDisconnect = true;  // 자동 재연결 억제
+      cancelAttempts(wasTrying
+        ? "중단 버튼 클릭 → 연결 시도를 멈춥니다."
+        : "해제 버튼 클릭 → 연결을 끊습니다.");
+      setConnected(false);
+      renderDevices();
+      showScreen("devices");  // 끊었으면 다음 장비를 고를 수 있어야 한다
+    }
+
+    // -----------------------------------------------------------------------
+    // 초기화
+    // -----------------------------------------------------------------------
+    if (!navigator.bluetooth) {
+      $("unsupported").hidden = false;
+      $("findNew").disabled = true;
+    }
+    $("findNew").addEventListener("click", pickNewDevice);
+    $("disconnect").addEventListener("click", disconnect);
+    $("scan").addEventListener("click", doScan);
+    $("refresh").addEventListener("click", doRefresh);
+    $("manual").addEventListener("click", openManual);
+    $("back").addEventListener("click", () => showScreen("main"));
+    $("join").addEventListener("click", doJoin);
+    $("forget").addEventListener("click", doForget);
+    $("clear").addEventListener("click", () => ($("log").innerHTML = ""));
+
+    $("ssid").addEventListener("input", () => {
+      selectedSsid = $("ssid").value.trim();
+      const known = netList.find((n) => n.s === selectedSsid);
+      // 직접 입력(목록에 없는 SSID)이면 비밀번호 입력을 열어 둔다.
+      const needsPsk = known ? !!known.k : true;
+      $("psk").disabled = !needsPsk;
+      $("reveal").disabled = !needsPsk;
+      $("join").disabled = !selectedSsid || !device?.gatt?.connected;
+      $("forget").disabled = $("join").disabled;
+      renderNets();
+    });
+    $("ssid").addEventListener("keydown", (e) => { if (e.key === "Enter") $("psk").focus(); });
+    $("psk").addEventListener("keydown", (e) => { if (e.key === "Enter") doJoin(); });
+    // 가려진 상태(●)에서 [표시] 를 누르면 그때 장비에서 실제 값을 받아온다.
+    async function doReveal() {
+      const el = $("psk");
+      if (pskState === "masked") {
+        $("reveal").disabled = true;
+        try {
+          lastSecret = null;
+          await request({ cmd: "secret", ssid: $("ssid").value.trim() }, 20000);
+          if (lastSecret && typeof lastSecret.psk === "string") {
+            el.value = lastSecret.psk;
+            pskState = "real";
+          }
+        } catch (e) {
+          setProgress("저장된 비밀번호를 읽지 못했습니다: " + e.message, "err");
+          return;
+        } finally {
+          $("reveal").disabled = false;
+        }
+      }
+      el.type = el.type === "password" ? "text" : "password";
+      $("reveal").textContent = el.type === "password" ? "표시" : "숨김";
+    }
+    $("reveal").addEventListener("click", doReveal);
+
+    // 가려진 ● 위에 그대로 타이핑하면 값이 섞인다 — 포커스 시 전체 선택해서
+    // 첫 글자를 치는 순간 통째로 교체되게 하고, 바뀌면 masked 를 푼다.
+    $("psk").addEventListener("focus", () => {
+      if (pskState === "masked") $("psk").select();
+    });
+    $("psk").addEventListener("input", () => {
+      if (pskState === "masked") pskState = "none";
+    });
+    $("copyIp").addEventListener("click", async () => {
+      if (!lastStatus?.ip) return;
+      try {
+        await navigator.clipboard.writeText(lastStatus.ip);
+        setProgress(`IP ${lastStatus.ip} 를 복사했습니다.`, "ok");
+      } catch {
+        setProgress("복사 실패 — 주소를 직접 선택해 복사하세요.", "err");
+      }
+    });
+    // 디버그: 원시 문자열 전송(장비는 JSON 이 아니면 echo 로 되돌려준다)
+    async function sendRaw() {
+      const text = $("raw").value;
+      if (!text) return;
+      try {
+        const data = enc.encode(text + "\n");
+        writeChain = writeChain.then(async () => {
+          for (let i = 0; i < data.length; i += CHUNK) {
+            const part = data.slice(i, i + CHUNK);
+            try { await rxChar.writeValueWithResponse(part); }
+            catch { await rxChar.writeValueWithoutResponse(part); }
+          }
+        });
+        await writeChain;
+        log("→ " + text, "log-tx");
+        $("raw").value = "";
+      } catch (e) {
+        log("전송 실패: " + e.message, "log-err");
+      }
+    }
+    $("send").addEventListener("click", sendRaw);
+    $("raw").addEventListener("keydown", (e) => { if (e.key === "Enter") sendRaw(); });
+
+    // 서비스워커 등록(PWA 설치·오프라인 셸). localhost/https 에서만 동작.
+    if ("serviceWorker" in navigator) {
+      // 이미 서비스워커가 이 페이지를 쥐고 있었는지 — 최초 등록과 '새 버전으로
+      // 교체됨' 을 구분하는 기준이다. 최초 등록 때 새로고침하면 안 된다.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+
+      navigator.serviceWorker.register("./sw.js")
+        .then((reg) => reg.update())  // 열 때마다 새 sw.js 가 있는지 확인
+        .catch((e) => log("서비스워커 등록 실패: " + e.message, "log-err"));
+
+      // 새 서비스워커가 제어권을 잡으면(sw.js 의 skipWaiting + claim) 화면도
+      // 새 셸로 다시 띄운다. 이게 없으면 새 버전을 받아 놓고도 화면은 옛
+      // 버전이라 "새로고침을 두 번 해야 바뀌는" 상태가 된다.
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController || reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+    }
+
+    // 화면 하단·로그에 앱 버전과 실제 서비스워커 캐시 이름을 표시한다.
+    // 앱 버전이 안 바뀌면 index.html 이 예전 캐시로 뜨는 것 → SW 갱신 필요.
+    async function showVersion() {
+      let cacheName = "-";
+      try {
+        const sw = navigator.serviceWorker;
+        if (sw && sw.controller) {
+          // 제어 중인 워커에게 직접 묻는다. caches.keys() 로 고르면 새 캐시가
+          // 설치돼도 아직 안 지워진 옛 캐시가 먼저 잡혀 한 세대 늦게 보인다.
+          cacheName = await new Promise((resolve) => {
+            const timer = setTimeout(() => finish("?"), 1000);
+            const onMsg = (e) => {
+              if (e.data && e.data.type === "cache-name") finish(e.data.cache);
+            };
+            function finish(v) {
+              clearTimeout(timer);
+              sw.removeEventListener("message", onMsg);
+              resolve(v);
+            }
+            sw.addEventListener("message", onMsg);
+            sw.controller.postMessage({ type: "cache-name" });
+          });
+        } else if (window.caches) {
+          const keys = await caches.keys();
+          cacheName = keys.find((k) => k.startsWith("pi-ble")) || keys[0] || "-";
+        }
+      } catch { /* 무시 */ }
+      $("version").textContent = `앱 ${APP_VERSION} · 캐시 ${cacheName}`;
+      log(`앱 버전 ${APP_VERSION} · SW 캐시 ${cacheName}`);
+    }
+
+    // 화면 복귀(탭 전환·화면 켜짐) 시: 작업 중이던 장비가 끊겨 있으면 그 장비로만
+    // 재연결을 이어간다. 목록으로 나갔거나 사용자가 끊은 뒤에는 아무것도 안 한다.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden || userDisconnect) return;
+      if (!device || device.gatt?.connected || busy || retrying) return;
+      log("화면 복귀 — 작업 중이던 장비로 재연결합니다.", "log-sys");
+      reconnectLoop();
+    });
+
+    // 페이지 로드 시: 버전 표시 + 지원 상태 진단 + 장비 목록. 자동 연결은 없다.
+    window.addEventListener("load", async () => {
+      userDisconnect = true;   // 사용자가 고르기 전까지는 아무 데도 붙지 않는다
+      setConnected(false);
+      showScreen("devices");
+      await showVersion();
+      const hasWatch = "BluetoothDevice" in window
+        && "watchAdvertisements" in BluetoothDevice.prototype;
+      log(`watchAdvertisements 지원: ${hasWatch ? "예" : "아니오(연결이 불안정할 수 있음)"}`);
+      await renderDevices(true);
+    });
+  </script>
+</body>
+</html>

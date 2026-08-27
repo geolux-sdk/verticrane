@@ -1,0 +1,12 @@
+# Raspberry Pi Zero 2 W - BLE Peripheral 테스트
+#
+# bluezero 는 시스템 패키지인 dbus-python / PyGObject 에 의존합니다.
+# 라즈베리 파이에서는 먼저 apt 로 시스템 패키지를 설치하세요 (README 참고):
+#   sudo apt install -y bluez python3-dbus python3-gi
+#
+# 그런 다음 (가급적 --system-site-packages venv 안에서):
+#
+# ble_peripheral.py 는 bluezero 의 내부 속성(app/services/dongle/srv_mng/
+# mainloop)을 직접 조작해 publish() 의 광고 단계를 우회한다. 내부 구조가 바뀌면
+# 깨질 수 있으므로, 검증된 버전(Pi 실장비 0.9.1)으로 고정한다.
+bluezero==0.9.1

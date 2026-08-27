@@ -307,6 +307,8 @@ python test_stability.py     # 판정: 0/360 경계, 윈도우, 움직임 거부
 - **e-paper 한글이 네모로 나옴** — `sudo apt install -y fonts-nanum`.
 - **`.local` 주소로 접속이 안 됨** — 통신사 DNS가 없는 도메인에 엉뚱한 주소를
   돌려주면서 mDNS 응답이 묻힙니다. 장비 쪽 avahi는 정상입니다. **IP를 쓰세요.**
+- **WiFi가 바뀌어 장비에 아예 접속할 수 없음** — 화면도 키보드도 없어 SSH도 못 들어갑니다.
+  **블루투스로 Wi-Fi를 다시 붙일 수 있습니다** — [bt/INTEGRATION.md](bt/INTEGRATION.md).
 - **웹이 응답하는지 빠르게 보기** — `curl localhost:8080/healthz`. 이 요청은
   운영자 접속으로 세지 않으므로 자동 기록을 막지 않습니다.
 

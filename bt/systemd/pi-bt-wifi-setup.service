@@ -1,0 +1,37 @@
+[Unit]
+Description=Verticrane BLE Wi-Fi 프로비저닝 (BLE = Wi-Fi 설정 채널)
+# 어댑터(bluetoothd)와 NetworkManager 가 올라온 뒤에 시작해야
+# 광고 등록과 nmcli 조회가 첫 시도부터 성공한다.
+After=bluetooth.service NetworkManager.service
+Wants=bluetooth.service NetworkManager.service
+
+[Service]
+Type=simple
+# mgmt 소켓(광고)과 nmcli 설정 변경 둘 다 root 권한이 필요하다.
+User=root
+WorkingDirectory=/home/pi/verticrane/bt
+Environment=PYTHONUNBUFFERED=1
+
+# 부팅 직후 어댑터가 soft block 되어 있으면 광고 등록이 실패한다.
+# 실패해도 기동은 계속하도록 '-' 를 붙였다(이미 unblock 이면 그대로 성공).
+# 전원 켜기는 코드가 D-Bus 로 직접 한다 — btmgmt(CLI)는 tty 가 없으면
+# 멈추므로 여기서 절대 쓰지 말 것.
+ExecStartPre=-/usr/sbin/rfkill unblock bluetooth
+
+# Uses the project venv, which is built with --system-site-packages so the
+# apt-installed python3-dbus and python3-gi that bluezero needs are visible.
+ExecStart=/home/pi/verticrane/.venv/bin/python /home/pi/verticrane/bt/ble_peripheral.py
+
+# 프로세스가 죽으면 광고도 사라져 아무도 장비를 찾지 못한다. 항상 되살린다.
+Restart=always
+RestartSec=3
+
+# 로그는 journald 로 (journalctl -u pi-bt-wifi-setup -f)
+#
+# 기록기와는 별개 프로세스다. BLE 는 시리얼 포트를 쓰지 않으므로 충돌이 없고,
+# 이 서비스가 죽어도 측정은 계속된다.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
