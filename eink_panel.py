@@ -323,13 +323,15 @@ def _hms(seconds: float) -> str:
     return "{0:d}:{1:02d}:{2:02d}".format(s // 3600, (s // 60) % 60, s % 60)
 
 
-def wifi_ssid(configured: str = "") -> Optional[str]:
-    """The network to join, not the one currently joined.
+def wifi_label(configured: str = "", connected: bool = False) -> Optional[str]:
+    """What to print on the wifi line, and only what can be stated as fact.
 
-    Up the crane there is no connection, and that is exactly when the operator
-    needs to be told which SSID to look for. So this reports the *saved* profile
-    rather than the active one -- the most recently used, since that is what
-    NetworkManager will reach for first, with "+N" when others are saved too.
+    Connected, the SSID is certain and worth naming. Disconnected with several
+    profiles saved, there is no "the network it should join" -- NetworkManager
+    takes whichever is in range, so naming one would present a guess as a fact.
+    In that case the count is said instead, and BLE is where the list belongs.
+
+    One saved profile is the exception: there is nothing to be ambiguous about.
     """
     if configured:
         return configured
@@ -355,11 +357,9 @@ def wifi_ssid(configured: str = "") -> Optional[str]:
             saved.append((used, name))
         if saved:
             saved.sort(reverse=True)
-            # "+N" when other networks are saved too. The most recently used one
-            # is the best single guess at what the device will rejoin, but it is
-            # a guess -- and a panel that named it alone would read as a fact.
-            extra: str = "  +{0}".format(len(saved) - 1) if len(saved) > 1 else ""
-            return saved[0][1] + extra
+            if connected or len(saved) == 1:
+                return saved[0][1]
+            return "저장 {0}개".format(len(saved))
     except (OSError, subprocess.SubprocessError):
         pass
     try:
@@ -479,7 +479,8 @@ class PanelThread:
         show(render(status,
                     contact_face=str(self.cfg.get("contact_face", "bottom")),
                     rotate=int(self.cfg.get("panel_rotation", 90)),
-                    ssid=wifi_ssid(str(self.cfg.get("wifi_ssid", "")))))
+                    ssid=wifi_label(str(self.cfg.get("wifi_ssid", "")),
+                                    connected=bool(status["ip"]))))
 
 
 def main() -> int:
@@ -510,7 +511,7 @@ def main() -> int:
     elif args.screen == SCREEN_INSTALL:
         demo["state"] = "waiting_stable"
     img = render(demo, contact_face=args.contact_face, rotate=args.rotate,
-                 ssid=wifi_ssid())
+                 ssid=wifi_label(connected=bool(demo["ip"])))
 
     if args.out:
         if args.scale > 1:
