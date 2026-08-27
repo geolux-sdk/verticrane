@@ -307,6 +307,8 @@ class Status:
     samples: int = 0
     blocks: int = 0
     tilt: Optional[float] = None
+    roll: Optional[float] = None
+    pitch: Optional[float] = None
     temp_c: Optional[float] = None
     sensor_ok: bool = False
     time_quality: str = af.QUALITY_UNSYNCED
@@ -350,6 +352,7 @@ class Recorder:
         self._next_ntp_check: float = 0.0
         self._since_judged: int = 0
         self._next_purge: float = 0.0
+        self.panel: Optional[Any] = None
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
         logger.info("Boot #{} as {} [{}] in {}", self.boot_count, self.sensor_id,
@@ -566,6 +569,8 @@ class Recorder:
             roll=roll, pitch=pitch, yaw=yaw,
         )
         self.status.tilt = sample.tilt_pct
+        self.status.roll = roll
+        self.status.pitch = pitch
         self.monitor.add(stability.Sample(
             t=started, roll=roll, pitch=pitch, yaw=yaw,
             acc=sample.acc, gyro=sample.gyro,
@@ -748,10 +753,14 @@ class Recorder:
     def _set_state(self, state: str) -> None:
         if state != self.state:
             logger.info("State {} -> {}", self.state, state)
+            if self.panel is not None:
+                self.panel.refresh_now()
         self.state = state
         self.status.state = state
 
     def _shutdown(self) -> None:
+        if self.panel is not None:
+            self.panel.stop()
         self._stop_recording()
         self.time.save_last_known()
         self.sensor.close()
@@ -781,6 +790,8 @@ def main() -> int:
                         help="Exit non-zero if the sensor cannot be reached.")
     parser.add_argument("--no-web", action="store_true",
                         help="Do not start the HTTP server.")
+    parser.add_argument("--no-panel", action="store_true",
+                        help="Do not drive the e-paper panel.")
     parser.add_argument("--port-http", type=int, help="Override http_port.")
     args = parser.parse_args()
 
@@ -802,6 +813,16 @@ def main() -> int:
             # No Flask on this machine: keep recording rather than refusing to
             # start. The measurement matters more than the web page.
             logger.error("Web interface unavailable ({}); recording anyway", exc)
+
+    if not args.no_panel:
+        try:
+            import eink_panel
+            panel_cfg: dict[str, Any] = dict(cfg)
+            panel_cfg["slope_threshold_pct"] = app_config.load()["slope_threshold_pct"]
+            rec.panel = eink_panel.PanelThread(rec, panel_cfg)
+            rec.panel.start()
+        except Exception as exc:                          # noqa: BLE001
+            logger.error("Panel unavailable ({}); recording anyway", exc)
 
     # systemd sends SIGTERM on stop; finish the current block rather than
     # leaving a torn tail for the next boot to trim.

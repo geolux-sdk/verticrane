@@ -18,6 +18,7 @@ import argparse
 import os
 import socket
 import sys
+import threading
 import time
 from typing import Any, Optional
 
@@ -34,12 +35,23 @@ TITLE_H: int = 26
 WARN_Y: int = 171
 FOOT_Y: int = 150
 
-_DEJAVU: str = "/usr/share/fonts/truetype/dejavu"
+# The Pi carries DejaVu; the Windows entries exist only so the layout can be
+# previewed off the device. Falling through to the bitmap default silently
+# shrinks every number, which made an early preview look like a layout bug.
+_LATIN_REGULAR: tuple[str, ...] = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+)
+_LATIN_BOLD: tuple[str, ...] = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+)
 _KOREAN_CANDIDATES: tuple[str, ...] = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/unfonts-core/UnDotum.ttf",
+    "C:/Windows/Fonts/malgun.ttf",
 )
 
 WARNING_KO: str = "설치 후 방향 변경 금지"
@@ -68,10 +80,10 @@ def _font(size: int, bold: bool = False, korean: bool = False):
         path: Optional[str] = korean_font_path()
         if path:
             return ImageFont.truetype(path, size)
-    name: str = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    path = os.path.join(_DEJAVU, name)
-    if os.path.exists(path):
-        return ImageFont.truetype(path, size)
+    for candidate in (_LATIN_BOLD if bold else _LATIN_REGULAR):
+        if os.path.exists(candidate):
+            return ImageFont.truetype(candidate, size)
+    logger.warning("No scalable font found; the panel will be barely readable")
     return ImageFont.load_default()
 
 
@@ -89,6 +101,21 @@ def _label(text_ko: str, text_en: str) -> tuple[str, bool]:
                        "Install it with: sudo apt install fonts-nanum")
         _warned_no_korean = True
     return text_en, False
+
+
+def _fit(draw: ImageDraw.ImageDraw, text: str, width: int, size: int,
+         bold: bool = False, korean: bool = False, floor: int = 8):
+    """Largest font at or below `size` whose text fits `width`.
+
+    A warning clipped at both ends says nothing. The panel is 200 px wide and
+    the strings are fixed, so shrinking to fit beats guessing a size.
+    """
+    while size > floor:
+        font = _font(size, bold=bold, korean=korean)
+        if draw.textlength(text, font=font) <= width:
+            return font
+        size -= 1
+    return _font(floor, bold=bold, korean=korean)
 
 
 def _right(draw: ImageDraw.ImageDraw, xr: int, y: int, text: str, font, fill: int) -> None:
@@ -127,13 +154,13 @@ def draw_orientation(d: ImageDraw.ImageDraw, x: int, y: int,
 
     # Y comes out of the page towards the viewer; X runs to the right.
     cy: int = (box_t + box_b) // 2
-    d.ellipse([box_l + 7, cy - 6, box_l + 19, cy + 6], outline=0, width=1)
-    d.ellipse([box_l + 12, cy - 1, box_l + 14, cy + 1], fill=0)
-    d.text((box_l + 6, cy + 7), "Y", font=_font(10), fill=0)
+    d.ellipse([box_l + 8, cy - 6, box_l + 20, cy + 6], outline=0, width=1)
+    d.ellipse([box_l + 13, cy - 1, box_l + 15, cy + 1], fill=0)
+    d.text((box_l + 22, cy - 6), "Y", font=_font(10), fill=0)
 
-    d.line([box_r - 22, cy, box_r - 6, cy], fill=0, width=2)
-    d.polygon([(box_r - 3, cy), (box_r - 9, cy - 4), (box_r - 9, cy + 4)], fill=0)
-    d.text((box_r - 20, cy - 15), "X", font=_font(10), fill=0)
+    d.line([box_r - 24, cy, box_r - 8, cy], fill=0, width=2)
+    d.polygon([(box_r - 5, cy), (box_r - 11, cy - 4), (box_r - 11, cy + 4)], fill=0)
+    d.text((box_r - 22, cy - 16), "X", font=_font(10), fill=0)
 
     # The contact face: a hatched band on whichever edge meets the structure.
     edges: dict[str, tuple[int, int, int, int]] = {
@@ -148,7 +175,7 @@ def draw_orientation(d: ImageDraw.ImageDraw, x: int, y: int,
         d.line([hx, ey1, min(hx + 6, ex1), ey0], fill=0, width=1)
 
     text, ko = _label(CONTACT_KO, CONTACT_EN)
-    _centre(d, ey1 + 3, text, _font(11 if ko else 9, korean=ko), 0, x, x + 80)
+    _centre(d, ey1 + 3, text, _fit(d, text, 78, 11, korean=ko, floor=7), 0, x, x + 80)
 
 
 # --------------------------------------------------------------------------
@@ -172,9 +199,12 @@ def render(status: dict[str, Any], threshold_pct: float = 0.1,
 
     # --- title bar: who this device is -----------------------------------
     d.rectangle([0, 0, WIDTH - 1, TITLE_H - 1], fill=0)
-    d.text((5, 5), str(status.get("sensor_id") or "verticrane"),
-           font=_font(14, bold=True), fill=255)
-    _right(d, WIDTH - 5, 5, position, _font(14, bold=True), 255)
+    pos_font = _font(14, bold=True)
+    pos_w: float = d.textlength(position, font=pos_font)
+    sensor_id: str = str(status.get("sensor_id") or "verticrane")
+    d.text((5, 5), sensor_id,
+           font=_fit(d, sensor_id, WIDTH - 16 - int(pos_w), 14, bold=True), fill=255)
+    _right(d, WIDTH - 5, 5, position, pos_font, 255)
 
     # --- orientation diagram + the reading --------------------------------
     draw_orientation(d, 2, TITLE_H + 2, contact_face)
@@ -212,8 +242,9 @@ def render(status: dict[str, Any], threshold_pct: float = 0.1,
     # --- the warning that has to outlive the power ------------------------
     d.rectangle([0, WARN_Y, WIDTH - 1, HEIGHT - 1], fill=0)
     text, ko = _label(WARNING_KO, WARNING_EN)
-    font = _font(15 if ko else 11, bold=True, korean=ko)
-    _centre(d, WARN_Y + (9 if ko else 11), text, font, 255)
+    font = _fit(d, text, WIDTH - 10, 16, bold=True, korean=ko)
+    bbox = d.textbbox((0, 0), text, font=font)
+    _centre(d, WARN_Y + (HEIGHT - WARN_Y - (bbox[3] - bbox[1])) // 2 - bbox[1], text, font, 255)
 
     if position == "UNSET":
         # Same signal the filename carries, made visible on site.
@@ -278,6 +309,74 @@ def show(img: Image.Image) -> bool:
             pass
 
 
+class PanelThread:
+    """Refreshes the panel on its own thread (section 9).
+
+    A refresh blocks on SPI for about 1.4 s. On the polling loop that would
+    drop 35 samples every minute, so it runs here and only ever reads a
+    snapshot the recorder has already prepared.
+    """
+
+    def __init__(self, recorder: Any, cfg: dict[str, Any]) -> None:
+        self.recorder = recorder
+        self.cfg = cfg
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._last_key: Optional[tuple] = None
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="panel", daemon=True)
+        self._thread.start()
+
+    def refresh_now(self) -> None:
+        """Called on a state change: those must not wait out the interval."""
+        self._wake.set()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._wake.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._draw()
+            except Exception as exc:                      # noqa: BLE001
+                # A missing or broken panel must never stop the recording.
+                logger.error("Panel update failed: {}", exc)
+            interval: float = float(self.cfg.get("panel_refresh_seconds", 60))
+            self._wake.wait(max(interval, 10.0))
+            self._wake.clear()
+
+    def _draw(self) -> None:
+        snap = self.recorder.snapshot()
+        status: dict[str, Any] = {
+            "sensor_id": snap.sensor_id,
+            "position": snap.position,
+            "state": snap.state,
+            "tilt_pct": snap.tilt,
+            "roll": snap.roll,
+            "pitch": snap.pitch,
+            "temp_c": snap.temp_c,
+            "samples": snap.samples,
+            "elapsed_s": snap.elapsed_s,
+            "time_quality": snap.time_quality,
+            "ip": local_ip(),
+        }
+        # Skip the refresh when nothing a reader would notice has changed: the
+        # panel wears out by refresh count, so an idle device should not spend
+        # them redrawing the same frame.
+        key = (status["state"], status["position"], status["ip"],
+               round(status["tilt_pct"], 3) if status["tilt_pct"] is not None else None,
+               status["samples"] // 250)
+        if key == self._last_key:
+            return
+        self._last_key = key
+        show(render(status,
+                    threshold_pct=float(self.cfg.get("slope_threshold_pct", 0.1)),
+                    contact_face=str(self.cfg.get("contact_face", "bottom"))))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render the e-paper status panel.")
     parser.add_argument("--out", help="Write a PNG instead of driving the panel.")
@@ -292,7 +391,7 @@ def main() -> int:
         "sensor_id": socket.gethostname()[:16],
         "position": args.position,
         "state": "recording",
-        "tilt_pct": 0.842 if args.alarm else 0.123,
+        "tilt_pct": 0.842 if args.alarm else 0.062,
         "roll": -1.086, "pitch": -0.061, "temp_c": 26.3,
         "samples": 12475, "elapsed_s": 8123,
         "time_quality": af.QUALITY_SYNCED,
