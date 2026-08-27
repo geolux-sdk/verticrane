@@ -214,19 +214,15 @@ def render(status: dict[str, Any], contact_face: str = "bottom") -> Image.Image:
         d.text((92, TITLE_H + 48), "%  tilt", font=_font(12), fill=0)
     # No judgement here: whether a reading is acceptable is decided by the
     # server that collects the files. This device records and hands over.
-    if status.get("state") == "recording":
-        _centre(d, TITLE_H + 66, "REC {0}".format(_hms(status.get("elapsed_s", 0))),
-                _font(15, bold=True), 0, 90, WIDTH - 4)
+    _centre(d, TITLE_H + 62, _temp(status.get("temp_c")),
+            _font(22, bold=True), 0, 90, WIDTH - 4)
 
-    # --- angles and running totals ---------------------------------------
-    d.line([4, FOOT_Y - 38, WIDTH - 5, FOOT_Y - 38], fill=0, width=1)
-    small = _font(13)
-    roll, pitch = status.get("roll"), status.get("pitch")
-    d.text((5, FOOT_Y - 34), "R {0}   P {1}".format(_deg(roll), _deg(pitch)),
-           font=small, fill=0)
-    d.text((5, FOOT_Y - 18), "{0}  {1} smp  {2}".format(
+    # --- state and running totals ------------------------------------------
+    d.line([4, FOOT_Y - 30, WIDTH - 5, FOOT_Y - 30], fill=0, width=1)
+    line: str = "{0}  {1}   {2} smp".format(
         STATE_SHORT.get(str(status.get("state")), "?"),
-        status.get("samples", 0), _temp(status.get("temp_c"))), font=small, fill=0)
+        _hms(status.get("elapsed_s", 0)), status.get("samples", 0))
+    d.text((5, FOOT_Y - 25), line, font=_fit(d, line, WIDTH - 10, 15, bold=True), fill=0)
 
     # --- how to reach it, and when this was drawn -------------------------
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
@@ -244,12 +240,8 @@ def render(status: dict[str, Any], contact_face: str = "bottom") -> Image.Image:
     return img
 
 
-def _deg(value: Optional[float]) -> str:
-    return "{0:+.2f}".format(value) if value is not None else "  --  "
-
-
 def _temp(value: Optional[float]) -> str:
-    return "{0:.1f}C".format(value) if value is not None else "--C"
+    return "{0:.1f}°C".format(value) if value is not None else "--°C"
 
 
 def _hms(seconds: float) -> str:
@@ -346,8 +338,6 @@ class PanelThread:
             "position": snap.position,
             "state": snap.state,
             "tilt_pct": snap.tilt,
-            "roll": snap.roll,
-            "pitch": snap.pitch,
             "temp_c": snap.temp_c,
             "samples": snap.samples,
             "elapsed_s": snap.elapsed_s,
@@ -380,7 +370,7 @@ def main() -> int:
         "position": args.position,
         "state": "recording",
         "tilt_pct": 0.062,
-        "roll": -1.086, "pitch": -0.061, "temp_c": 26.3,
+        "temp_c": 26.3,
         "samples": 12475, "elapsed_s": 8123,
         "time_quality": af.QUALITY_SYNCED,
         "ip": local_ip(),

@@ -316,12 +316,22 @@ _FIELDS: list[Field] = [
                    ("middle", "MIDDLE"), ("top", "TOP")],
           note="크레인의 어느 높이인지. 파일명 앞에 붙습니다. "
                "지정하지 않으면 UNSET_ 이 되어 나중에 구분할 수 없습니다."),
+    Field("http_wait_seconds", "접속 대기 시간", int, "초", 5, 600,
+          note="전원을 켠 뒤 이 시간 안에 접속하면 기록하지 않고 기다립니다. "
+               "접속이 없으면 자동으로 기록을 시작합니다."),
+    Field("segment_minutes", "파일 분할 주기", int, "분", 0, 1440,
+          note="0이면 전원이 꺼질 때까지 한 파일에 기록합니다. "
+               "값을 주면 그 주기마다 파일을 끊습니다."),
     Field("delete_after_download", "다운로드한 파일 정리", bool, "",
-          note="받은 파일을 목록에서 치웁니다. 휴지통에 보관 기간 동안 남습니다."),
+          note="받은 파일을 목록에서 치웁니다. 아래 기간 동안 휴지통에 남습니다."),
+    Field("trash_retention_days", "휴지통 보관 기간", int, "일", 0, 365,
+          note="받은 파일을 이 기간이 지나면 실제로 지웁니다."),
+    Field("min_free_mb", "최소 여유 공간", int, "MB", 50, 100000,
+          note="이 아래로 내려가면 휴지통부터 비우고, 그래도 모자라면 기록을 멈춥니다."),
 ]
 
-# Deliberately short. Everything else -- the stability limits, the sample rate,
-# the fsync interval, the file-splitting period -- is an engineering decision,
-# not an operator one. A stability limit set by hand either stops recordings
-# from ever starting or starts them mid-swing, and a setting on this page is a
-# setting somebody eventually changes. They live in config.json, over SSH.
+# What is NOT here: the stability limits, the sample rate and the fsync interval.
+# Those are engineering decisions, not operator ones -- a stability limit set by
+# hand either stops recordings from ever starting or starts them mid-swing, and
+# a setting on this page is a setting somebody eventually changes. They live in
+# config.json, reachable over SSH.
