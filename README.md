@@ -1,274 +1,280 @@
-# Verticrane 기울기 모니터링
+# Verticrane 기울기 기록 시스템
 
-WitMotion **HWT9037-485** 9축 IMU(기울기 센서)를 Modbus RTU / RS-485로 읽어
-기울기를 측정·기록·분석하고, 웹 대시보드로 보여주는 도구 모음입니다.
-**Windows**(개발)와 **라즈베리파이**(현장 배포)에서 동일하게 동작합니다.
+크레인의 수직도를 재는 무인 기록 장치입니다. **Raspberry Pi Zero 2 W**에
+**HWT9037-485**(9축 IMU)를 붙여, 전원만 넣으면 스스로 기록을 시작하고
+운영자는 브라우저로 파일을 받아 갑니다.
 
-## 하드웨어
+한 크레인에 **BASE / MIDDLE / TOP** 세 대를 설치해 높이별 기울기를 봅니다.
 
-**표준 구성 (현장 배포)**
-
-- 보드: **Raspberry Pi Zero 2 W** + 타겟 보드 (RS-485 트랜시버 내장, 자동 방향전환)
-- 센서: **HWT9037-485** (9축 IMU, Modbus RTU over RS-485)
-- 연결: 40핀 헤더 **8번 핀(GPIO14 TXD) / 10번 핀(GPIO15 RXD)** → 파이 온보드 UART `/dev/serial0`
-- 통신 속도: **115200 bps**(운용 기준). 공장 초기값은 9600이며 `configure_sensor.py`로 변경·저장
-- 프로토콜 상세: [doc/protocol.md](doc/protocol.md)
-
-온보드 UART는 기본적으로 꺼져 있습니다. 새 보드는 아래 **라즈베리파이 › 0. 시리얼 포트 열기**를
-최초 1회 실행해야 합니다.
-
-**개발/벤치 구성**
-
-- **USB-RS485 어댑터**(예: CH340) → Windows `COMx`, 리눅스 `/dev/ttyUSB0`.
-  별도 설정 없이 자동 감지되며, 온보드 UART가 없는 환경에서 선택됩니다
-
-## 구성
-
-| 파일 | 역할 |
-|------|------|
-| `hwt9037_485.py` | 장치 모델 (레지스터 읽기/쓰기, save/reboot) |
-| `port_config.py` | 시리얼 포트 결정 (`--port` / `VERTICRANE_PORT` / 자동감지 / 기본값) |
-| `app_config.py` | 설정·관리자 PIN 저장 (`config.json`) |
-| `read_status.py` | 센서 상태 읽기·디코드 (CLI) + 대시보드용 함수 |
-| `configure_sensor.py` | 6축 알고리즘 설정 + 선택적 baud 변경 |
-| `log_tilt.py` | 기울기를 CSV로 기록 + 분석 리포트 생성 |
-| `analyze_tilt.py` | CSV 분석 (통계·FFT·평가 리포트) |
-| `dashboard.py` | Streamlit 웹 대시보드 |
-| `pages/setup.py` | 숨겨진 `/setup` 관리자 페이지 |
-| `test.py` | 대시보드 기능 자가 점검 |
-
-> CLI 도구 중 **수동 실행**은 `configure_sensor.py`(설정)와 `test.py`(점검)이고,
-> 나머지는 대시보드가 사용/실행합니다.
+| | |
+|---|---|
+| 요구사항 | [TILT_기록시스템_구현요구사항.md](TILT_기록시스템_구현요구사항.md) |
+| 센서 프로토콜 | [doc/protocol.md](doc/protocol.md) |
+| 라즈베리파이 안내 | [doc/raspberry_pi.md](doc/raspberry_pi.md) |
 
 ---
 
-# 소스 받기 (git)
+# 운영자용
 
-저장소: `https://github.com/geolux-sdk/verticrane.git`
+## 쓰는 법
 
-### 라즈베리파이 / Linux
-```bash
-sudo apt update && sudo apt install -y git    # git 없으면
-cd ~
-git clone https://github.com/geolux-sdk/verticrane.git
-cd verticrane
+1. **전원을 켭니다.**
+2. **차량 근처라면** 1분 안에 브라우저로 접속하세요. 장비가 대기 상태로 있어
+   파일을 받거나 설정을 바꿀 수 있습니다.
+   ```
+   http://pi-tilt001.local:8080
+   ```
+   접속 주소는 장비 이름과 같습니다. e-paper 화면 아래쪽에 IP 주소도 나옵니다.
+3. **측정 지점에서 켜면** 접속하는 사람이 없으므로, 센서가 안정되는 대로
+   **자동으로 기록을 시작합니다.** 따로 할 일이 없습니다.
+4. 회수한 뒤 다시 켜서 접속하면 목록에서 파일을 받습니다.
+
+## 화면 보는 법
+
+e-paper 화면은 **전원이 꺼져도 그대로 남습니다.** 장비에 붙은 명패이기도 합니다.
+
 ```
-최신 코드 받기(이미 클론한 경우): `./update.sh` (git pull + 필요 시 의존성 재설치)
-
-### Windows
-[Git for Windows](https://git-scm.com/download/win) 설치 후, 터미널(또는 Git Bash)에서:
-```bat
-git clone https://github.com/geolux-sdk/verticrane.git
-cd verticrane
+┌────────────────────────────────┐
+│ pi-tilt001              TOP    │  장비 이름 · 설치 위치
+├────────────────────────────────┤
+│    ↑Z                          │
+│  ┌──────┐      0.062           │  기울기 (%)
+│  │ ⊙Y →X│      % tilt          │
+│  ├──────┤   REC 2:15:23        │  기록 경과 시간
+│  ▨▨▨▨▨▨                       │
+│   접촉면                        │  빗금 친 면을 구조물에 붙입니다
+├────────────────────────────────┤
+│ R -1.09  P -0.06               │
+│ REC  12475 smp  26.3C          │
+├────────────────────────────────┤
+│ 192.168.0.19        14:43:53   │  접속 주소 · 갱신 시각
+├────────────────────────────────┤
+│  설치 후 방향 변경 금지         │
+└────────────────────────────────┘
 ```
-최신 코드 받기: `git pull`
 
-> 비공개 저장소라면 클론 시 GitHub **사용자명 + Personal Access Token**(비밀번호 자리에 토큰)을
-> 입력해야 합니다. 토큰은 GitHub → Settings → Developer settings → Personal access tokens에서 발급.
+- **화면은 1분에 한 번 갱신됩니다.** 실시간 값은 브라우저에서 보세요.
+- 시각 옆에 `?`가 붙어 있으면 아직 시계가 맞지 않은 것입니다. 네트워크가 닿으면
+  저절로 맞춰지고, 기록 파일 이름도 그때 바로잡힙니다.
+- `NO NETWORK`는 WiFi가 끊긴 상태입니다. 기록에는 지장이 없습니다.
+
+## 설치할 때
+
+**설치 위치(BASE / MIDDLE / TOP)를 반드시 지정하세요.** 설정 화면에서 고릅니다.
+지정하지 않으면 파일 이름이 `UNSET_`으로 시작해서, 나중에 어느 높이의 데이터인지
+알 수 없게 됩니다.
+
+- 빗금 친 **아랫면**을 구조물에 붙입니다.
+- **Z축이 위**를 향하게 놓습니다.
+- **한번 설치한 뒤에는 방향을 바꾸지 마세요.** 방향이 바뀌면 그 전후 데이터를
+  같이 볼 수 없습니다.
+
+## 파일 받기
+
+목록에서 **받기**를 누르면 됩니다.
+
+- 받은 파일은 목록에서 사라지고 휴지통에 7일간 남습니다.
+- **전송이 중간에 끊기면 파일은 그대로 있습니다.** 다시 받으세요.
+- 시간이 이어지는 파일은 **하나로 합쳐서** 받을 수 있습니다.
+- 파일 이름이 곧 어느 장비의 언제 기록인지입니다:
+  `TOP_20260827_143629.ahrsbin`
+
+| 이름에 붙는 표시 | 뜻 |
+|---|---|
+| `UNSET_` | 설치 위치를 지정하지 않았습니다 |
+| `.unsynced` | 기록할 때 시계가 맞지 않았습니다. 데이터는 온전합니다 |
+| `.recovered` | 전원이 갑자기 끊겨 마지막 1초쯤이 잘렸습니다 |
 
 ---
 
-# Windows (개발용)
+# 설치 (라즈베리파이)
 
-시스템 파이썬을 그대로 사용합니다.
+## 0. 시리얼 포트 열기 (최초 1회)
 
-### 1. 설치
-```bat
-install_requirements.bat
-```
-
-### 2. 센서 설정 (최초 1회)
-6축 알고리즘 + 통신 속도 115200으로 설정·저장 (공장 9600 센서도 자동으로 찾음):
-```bat
-python configure_sensor.py --baud 115200
-```
-
-### 3. 자가 점검
-```bat
-python test.py                 :: 전체 (센서 필요), 라이브 1초
-python test.py --seconds 10    :: 라이브 측정 10초
-python test.py --no-hardware   :: 소프트웨어만 (센서 없이)
-```
-
-### 4. 대시보드 실행
-```bat
-run_dashboard.bat
-```
-브라우저: `http://localhost:8501`
-
-### 기울기 로그 (선택)
-```bat
-python log_tilt.py 10          :: 10분간 기록 → data\*.csv + *.txt
-```
-
-> Windows 기본 포트는 `COM11`입니다. 다르면 `--port COM3`처럼 지정하세요.
-
----
-
-# 라즈베리파이 (현장 배포)
-
-PEP 668 때문에 시스템 파이썬에 직접 설치할 수 없으므로 **가상환경 `.venv`** 를 사용합니다.
-설치/업데이트 스크립트가 `.venv`를 자동으로 만들고 사용합니다. **`sudo` 없이** 실행하세요.
-
-### 0. 시리얼 포트 열기 (최초 1회, 표준 하드웨어)
-
-파이의 온보드 UART는 **기본적으로 꺼져 있고**, 시리얼 콘솔이 그 포트를 점유합니다.
-게다가 Zero 2 W는 성능이 좋은 PL011을 블루투스가 가져가고 GPIO에는 mini UART를 배정하는데,
-mini UART는 보레이트가 코어 클럭에 묶여 있어 115200 Modbus에서 프레임이 깨질 수 있습니다.
-아래 설정으로 UART를 켜고, 콘솔을 떼고, PL011을 GPIO14/15에 배정합니다.
+파이의 온보드 UART는 기본적으로 꺼져 있고 시리얼 콘솔이 포트를 점유합니다.
+게다가 Zero 2 W는 성능이 좋은 PL011을 블루투스가 가져가고 GPIO에는 mini UART를
+배정하는데, mini UART는 보레이트가 코어 클럭에 묶여 있어 115200 Modbus에서
+프레임이 깨질 수 있습니다.
 
 ```bash
 sudo cp /boot/firmware/config.txt  /boot/firmware/config.txt.bak
 sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
 
-# UART 활성화 + 블루투스를 떼어 PL011을 헤더로 보냄
 sudo tee -a /boot/firmware/config.txt >/dev/null <<'EOF'
 
 enable_uart=1
 dtoverlay=disable-bt
 EOF
 
-# 시리얼 콘솔 제거 (포트를 점유하므로)
 sudo sed -i 's/console=serial0,115200 //' /boot/firmware/cmdline.txt
-
 sudo reboot
 ```
 
-재부팅 후 확인 — `/dev/serial0 -> ttyAMA0` 링크가 보이면 정상입니다.
+재부팅 후 `ls -l /dev/serial0`에서 `-> ttyAMA0`이 보이면 정상입니다.
+
+> 블루투스도 써야 한다면 `disable-bt` 대신 **`miniuart-bt`** 를 쓰세요. 포트 경로가
+> 그대로라 코드 수정이 필요 없습니다. 대신 코어 클럭이 250MHz로 고정됩니다.
+
+## 1. 장비 이름 정하기
+
+**hostname이 그대로 SENSOR_ID가 되고 접속 주소가 됩니다.** 의미 있게 지으세요.
+
 ```bash
-ls -l /dev/serial0
+sudo hostnamectl set-hostname pi-tilt001
 ```
 
-> **블루투스도 써야 한다면** `disable-bt` 대신 **`miniuart-bt`** 를 쓰세요. 센서는 PL011을
-> 그대로 유지한 채 블루투스만 mini UART로 옮겨집니다. 포트 경로(`/dev/serial0`)도 그대로라
-> 코드 수정이 필요 없습니다. 대신 코어 클럭이 250MHz로 고정되고 BT 대역폭이 낮아집니다
-> (BLE·시리얼 프로파일 수준은 충분, 오디오 스트리밍은 무리).
+## 2. 설치
 
-### 1. 설치 (최초 1회)
 ```bash
-cd ~/verticrane
-chmod +x *.sh                    # 실행 권한
-./install_requirements.sh        # .venv 생성 + 의존성 설치 (sudo 없이!)
-
-sudo usermod -aG dialout $USER   # 시리얼 권한 → 재로그인/재부팅 필요
+cd ~
+git clone https://github.com/geolux-sdk/verticrane.git
+cd verticrane
+chmod +x *.sh dev/*.sh
+./install_requirements.sh          # sudo 없이!
+sudo usermod -aG dialout $USER     # 재로그인 필요
 ```
 
-### 2. 센서 설정 (최초 1회)
+`fonts-nanum`이 없으면 e-paper의 한글이 영문으로 대체됩니다:
 ```bash
-.venv/bin/python configure_sensor.py --baud 115200
+sudo apt install -y fonts-nanum
 ```
 
-### 3. 자가 점검
-`test.sh`는 자동으로 `.venv` 파이썬을 사용합니다.
-```bash
-./test.sh                    # 전체 (센서 필요), 라이브 1초
-./test.sh --seconds 10       # 라이브 측정 10초
-./test.sh --no-hardware      # 소프트웨어만 (센서 없이)
-```
-`N/N 통과`가 나오면 정상입니다.
+## 3. 센서 설정 (최초 1회)
 
-### 4. 대시보드 실행
 ```bash
-./run_dashboard.sh           # .venv를 자동으로 사용
+.venv/bin/python dev/configure_sensor.py --baud 115200
 ```
-브라우저: `http://<파이IP>:8501` (같은 네트워크의 PC/폰에서 접속 가능)
 
-### 5. 상시 가동 (systemd)
-전원만 켜면 자동 시작되고, 죽으면 자동 재시작됩니다.
+## 4. 자가 점검
+
 ```bash
-sudo cp ~/verticrane/verticrane-dashboard.service /etc/systemd/system/
+./test.sh --no-hardware    # 소프트웨어만
+./test.sh                  # 센서 포함
+```
+
+## 5. 상시 가동
+
+```bash
+sudo cp verticrane-recorder.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now verticrane-dashboard
+sudo systemctl enable --now verticrane-recorder
+
+# 예전 대시보드 서비스가 등록돼 있다면 반드시 끄세요 (같은 시리얼 포트를 다툽니다)
+sudo systemctl disable --now verticrane-dashboard 2>/dev/null || true
 ```
+
 관리:
 ```bash
-systemctl status verticrane-dashboard         # 상태
-journalctl -u verticrane-dashboard -f         # 로그
-sudo systemctl restart verticrane-dashboard   # 재시작 (코드 업데이트 후)
-sudo systemctl stop verticrane-dashboard      # 중지
+systemctl status verticrane-recorder
+journalctl -u verticrane-recorder -f
 ```
-> 서비스로 띄운 뒤엔 `./run_dashboard.sh`를 따로 실행하지 마세요(포트 8501 충돌).
 
-서비스에는 `StartLimitIntervalSec=0`이 설정돼 있어, 반복 크래시에도 systemd가
-**재시작을 포기하지 않습니다**.
+## 6. 업데이트
 
-#### 헬스체크 워치독 (선택, 권장)
-`Restart=always`는 프로세스가 죽었을 때만 재시작합니다. **살아있지만 무응답**인
-상태까지 잡으려면 헬스체크 타이머를 함께 등록하세요. 매 1분마다 대시보드의
-HTTP 헬스 엔드포인트를 확인해, 응답이 없으면 서비스를 재시작합니다.
 ```bash
-sudo cp ~/verticrane/verticrane-healthcheck.service /etc/systemd/system/
-sudo cp ~/verticrane/verticrane-healthcheck.timer   /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now verticrane-healthcheck.timer
+./update.sh
+sudo systemctl restart verticrane-recorder
 ```
-확인:
-```bash
-systemctl list-timers verticrane-healthcheck.timer      # 다음 실행 시각
-journalctl -u verticrane-healthcheck -n 20              # 동작 로그
-```
-
-### 6. 업데이트
-```bash
-./update.sh                                   # git pull + 필요 시 의존성 재설치
-sudo systemctl restart verticrane-dashboard   # systemd 가동 중이면 재시작
-```
-
-### CLI 도구 실행 규칙 (중요)
-라즈베리파이에서 CLI 도구는 **반드시 venv 파이썬**으로 실행합니다.
-시스템 `python`으로 실행하면 `ModuleNotFoundError: pymodbus`가 납니다.
-```bash
-.venv/bin/python <스크립트>          # 예: .venv/bin/python read_status.py
-# 또는 활성화 후
-source .venv/bin/activate
-python <스크립트>
-```
-대시보드(`run_dashboard.sh`)와 systemd 서비스는 **자동으로 venv**를 쓰므로 활성화가 필요 없습니다.
-
-자세한 라즈베리파이 안내: [doc/raspberry_pi.md](doc/raspberry_pi.md)
 
 ---
 
-# 공통
+# 개발자용
 
-## 관리자 설정 (`/setup`)
+`dev/`에 있는 도구들은 **운영자에게 노출되지 않습니다.** 웹에서 접근할 수 있는
+숨겨진 링크도 없습니다. SSH로 접속해서 직접 실행하는 것이 유일한 방법입니다.
 
-기울기 경보 **임계값**과 **이동평균 윈도우**(판단 기준)는 숨겨진 관리자 페이지에서
-바꿉니다. 사이드바에 링크가 없고 URL로만 접근합니다.
+## 중요: 시리얼 포트는 하나뿐입니다
 
-1. `http://<기기IP>:8501/setup` 접속
-2. **PINCODE** 입력 (초기 PINCODE는 별도로 전달받으세요)
-3. 임계값·이동평균 수정 후 저장, **PINCODE 변경**
+기록기가 포트를 점유하고 있어 `dev/` 도구 대부분이 그냥은 동작하지 않습니다.
+**`devmode.sh`를 쓰세요** — 서비스를 멈추고, 명령을 실행하고, **끝나면 반드시
+다시 켭니다.** Ctrl-C를 눌러도, 명령이 실패해도 되살립니다.
 
-- 설정은 `config.json`에 저장되며 대시보드와 분석 리포트에 즉시 반영됩니다.
-- `config.json`은 git에 포함되지 않습니다(기기별). 새 기기는 기본값으로 시작하니
-  **첫 사용 시 PIN을 반드시 변경**하세요.
+```bash
+./dev/devmode.sh                                    # 개발자 셸 (나가면 복구)
+./dev/devmode.sh .venv/bin/python read_status.py    # 명령 하나만
+./dev/devmode.sh ./dev/run_dashboard.sh             # 대시보드
+```
 
-> 보안 수준: URL 은닉 + PIN의 가벼운 보호입니다. 외부 노출이 필요하면
-> VPN 또는 리버스 프록시(HTTPS+인증)를 거치세요.
+> 손으로 `systemctl stop`을 하는 것은 쉽지만 다시 켜는 것을 잊기는 더 쉽습니다.
+> 조용히 기록을 멈춘 현장 장비가 이 프로젝트에서 가장 나쁜 결과입니다.
 
-## 포트 지정
+## 기록 파일 다루기
 
-모든 도구는 다음 순서로 시리얼 포트를 결정합니다:
+```bash
+# .ahrsbin -> CSV (기존 분석 도구가 읽는 형식)
+.venv/bin/python dev/ahrsbin_to_csv.py data/TOP_20260827_143629.ahrsbin
 
-1. `--port` 인자 (예: `--port /dev/serial0`)
-2. `VERTICRANE_PORT` 환경변수
-3. 파이 온보드 UART `/dev/serial0` (없으면 `/dev/ttyAMA0`) — **표준 배선**
-4. USB 시리얼 어댑터 자동 감지
-5. 플랫폼 기본값 (Linux `/dev/serial0`, Windows `COM11`)
+# 변환하고 분석 리포트까지
+.venv/bin/python dev/ahrsbin_to_csv.py data/*.ahrsbin --report
+```
 
-온보드 UART와 USB 동글이 동시에 있으면 **온보드가 우선**합니다. GPS나 디버그 케이블 같은
-무관한 USB 시리얼 장치를 센서로 오인하지 않기 위해서입니다. 동글을 쓰려면 `--port`나
-`VERTICRANE_PORT`로 명시하세요. 어댑터가 여러 개면 `/dev/serial/by-id/...` 경로가 안정적입니다.
+## 기준값 맞추기
 
-## 문제 해결
+기록된 CSV로 안정화 판정 기준을 검증할 수 있습니다. 하드웨어가 필요 없습니다.
 
-- **`ModuleNotFoundError: No module named 'pymodbus'`** (라즈베리파이) — 시스템 `python`으로
-  실행한 경우입니다. `.venv/bin/python <스크립트>` 또는 `source .venv/bin/activate` 후 실행하세요.
-- **`No response at 9600 bps` 메시지** — 정상입니다. 115200을 먼저 시도하므로 보통 바로 연결됩니다.
-- **`/dev/serial0`이 없음** (Pi) — 온보드 UART가 아직 꺼져 있습니다. 위 **0. 시리얼 포트 열기**를
-  실행하고 재부팅하세요.
-- **센서 연결 실패** — (Pi) `dialout` 그룹 추가 후 재로그인했는지, 표준 배선이면 8·10번 핀 결선과
-  RS-485 A/B 극성이 맞는지, USB 구성이면 어댑터가 꽂혀 있는지, 다른 프로그램이 포트를 점유하고
-  있지 않은지 확인하세요.
-- **종합 점검** — Windows `python test.py`, 라즈베리파이 `./test.sh`로 어느 단계에서 막히는지 확인하세요.
+```bash
+python stability.py data/*.csv
+python stability.py data/*.csv --gyro-rms 0.1     # 기준을 바꿔 시험
+```
+
+## e-paper 화면 미리보기
+
+```bash
+python eink_panel.py --out panel.png --scale 3    # 하드웨어 없이 PNG로
+python eink_panel.py --position BASE --alarm      # 실제 패널에 그리기
+```
+
+## 구성
+
+**운영 (루트)**
+
+| 파일 | 역할 |
+|---|---|
+| `recorder.py` | 기록 루프와 상태 기계. systemd가 띄우는 것 |
+| `ahrs_file.py` | `.ahrsbin` 포맷 — 읽기·쓰기·복구·병합 |
+| `stability.py` | 안정화 판정 |
+| `filestore.py` | 파일 목록·연속 그룹·휴지통 |
+| `web/` | 운영자 웹 (Flask, 8080) |
+| `eink_panel.py` | e-paper 화면 |
+| `read_status.py` | 센서 연결·상태 읽기 **(recorder가 사용)** |
+| `hwt9037_485.py` | 장치 모델 (Modbus) |
+| `port_config.py` | 시리얼 포트 결정 |
+| `app_config.py` | 설정·PIN·로그 (`config.json`) |
+| `gdey0154d67.py` | e-paper 드라이버 |
+
+**개발자 (`dev/`)**
+
+| 파일 | 역할 |
+|---|---|
+| `devmode.sh` | 서비스를 멈추고 도구를 실행한 뒤 되살림 |
+| `ahrsbin_to_csv.py` | `.ahrsbin` → CSV 변환 |
+| `dashboard.py`, `pages/setup.py` | Streamlit 분석 대시보드 |
+| `analyze_tilt.py` | CSV 분석 (통계·FFT) |
+| `log_tilt.py` | CSV 직접 기록 (구형) |
+| `configure_sensor.py` | 센서 설정 (6축 알고리즘, baud) |
+| `eink_status.py`, `eink_test.py` | 패널 시험 도구 |
+| `test.py` | 대시보드 자가 점검 |
+
+## 자가 점검
+
+```bash
+python test_ahrs_file.py     # 포맷: 쓰기 → 자르기 → 복구 → 병합 (하드웨어 불필요)
+python test_stability.py     # 판정: 0/360 경계, 윈도우, 움직임 거부
+./test.sh                    # 위 둘 + 센서 점검
+```
+
+---
+
+# 문제 해결
+
+- **기록이 시작되지 않음** — 웹 상태 화면의 안정화 판정 표를 보세요. 어느 지표가
+  기준을 넘었는지 나옵니다. 장비가 흔들리거나 제대로 안착되지 않은 경우가 대부분입니다.
+- **파일 이름이 `UNSET_`으로 시작** — 설정 화면에서 설치 위치를 지정하세요.
+- **파일 이름에 `.unsynced`** — 기록할 때 네트워크가 없어 시계를 못 맞춘 것입니다.
+  데이터는 온전하고 상대 시간(기록 시작 후 몇 초)은 정확합니다.
+- **`ModuleNotFoundError: pymodbus`** — 시스템 `python`으로 실행한 경우입니다.
+  `.venv/bin/python`을 쓰세요.
+- **`/dev/serial0`이 없음** — 위 **0. 시리얼 포트 열기**를 실행하고 재부팅하세요.
+- **센서 연결 실패** — 기록기가 포트를 쓰고 있지 않은지(`devmode.sh` 사용),
+  `dialout` 그룹에 들어 있는지, 8·10번 핀 결선과 RS-485 A/B 극성을 확인하세요.
+- **e-paper 한글이 네모로 나옴** — `sudo apt install -y fonts-nanum`.
