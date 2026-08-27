@@ -28,6 +28,7 @@ BOOT_CONFIG=/boot/firmware/config.txt
 BOOT_CMDLINE=/boot/firmware/cmdline.txt
 
 reboot_needed=0
+relogin_needed=0
 todo=()
 
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -133,12 +134,41 @@ else
     ok "시리얼 콘솔 없음"
 fi
 
-if id -nG "$(whoami)" | tr ' ' '\n' | grep -qx dialout; then
-    ok "dialout 그룹"
+# --------------------------------------------------------------------------
+say "SPI (e-paper)"
+
+# The panel is an SSD1681 on SPI0. Without the bus the recorder still records,
+# but the device loses the only display it has.
+if grep -qE '^dtparam=spi=on' "${BOOT_CONFIG}"; then
+    ok "dtparam=spi=on"
 else
-    act "dialout 그룹에 추가 (재로그인 필요)"
-    run sudo usermod -aG dialout "$(whoami)"
-    todo+=("다시 로그인해야 시리얼 포트 권한이 적용됩니다 (재부팅해도 됩니다)")
+    backup_boot
+    act "dtparam=spi=on 추가"
+    run sudo sh -c "printf 'dtparam=spi=on\n' >> ${BOOT_CONFIG}"
+    reboot_needed=1
+fi
+
+# --------------------------------------------------------------------------
+say "장치 접근 권한"
+
+# dialout for the sensor, spi and gpio for the panel. Missing any of them fails
+# at open() with a permission error that reads like broken wiring.
+for grp in dialout spi gpio; do
+    if ! getent group "${grp}" >/dev/null 2>&1; then
+        warn "${grp} 그룹이 없습니다 — 관련 장치가 아직 없는 것일 수 있습니다"
+        continue
+    fi
+    if id -nG "$(whoami)" | tr ' ' '\n' | grep -qx "${grp}"; then
+        ok "${grp} 그룹"
+    else
+        act "${grp} 그룹에 추가"
+        run sudo usermod -aG "${grp}" "$(whoami)"
+        relogin_needed=1
+    fi
+done
+
+if [ "${relogin_needed}" -eq 1 ]; then
+    todo+=("그룹이 바뀌었습니다. 다시 로그인해야 장치 권한이 적용됩니다 (재부팅해도 됩니다)")
 fi
 
 # --------------------------------------------------------------------------
