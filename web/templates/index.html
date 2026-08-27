@@ -101,23 +101,27 @@
   {% else %}
     <div class="wrap"><table>
       <tr>
-        <th>시작 시각</th><th class="num">길이</th><th class="num">샘플</th>
-        <th class="num">크기</th><th>비고</th><th></th>
+        <th>파일 이름</th><th class="num">길이</th><th class="num">샘플</th>
+        <th class="num">크기</th><th></th>
       </tr>
       {% set ns = namespace(seen=[]) %}
       {% for f in files %}
       <tr>
         <td>
-          {{ f.start }}
-          {% if not f.trusted_time %}<span class="pill warn" title="시각을 믿을 수 없습니다">?</span>{% endif %}
+          {# The name is what lands on the operator's laptop, and it already
+             carries the position and the corrected start time. #}
+          <code style="font-size:13px">{{ f.name }}</code>
+          <div class="small muted">
+            {{ f.start }}
+            {% if not f.trusted_time %}
+              <span class="pill warn" title="기록할 때 시계가 맞지 않았습니다">시각 미확인</span>
+            {% endif %}
+            {% if f.recovered %}<span class="muted">· 전원 차단 복구</span>{% endif %}
+          </div>
         </td>
         <td class="num">{{ "%.0f"|format(f.duration_s) }} 초</td>
         <td class="num">{{ f.samples }}</td>
         <td class="num">{{ "%.1f"|format(f.size / 1048576) }} MB</td>
-        <td class="small muted">
-          {% if f.recovered %}전원 차단 복구{% endif %}
-          {% if not f.trusted_time %} 시각 미확인{% endif %}
-        </td>
         <td class="num">
           <button class="btn" onclick="collect(this, '/api/files/{{ f.name }}', '{{ f.name }}')">받기</button>
         </td>
