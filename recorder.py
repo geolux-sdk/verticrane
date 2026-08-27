@@ -826,9 +826,7 @@ def main() -> int:
     if not args.no_panel:
         try:
             import eink_panel
-            panel_cfg: dict[str, Any] = dict(cfg)
-            panel_cfg["slope_threshold_pct"] = app_config.load()["slope_threshold_pct"]
-            rec.panel = eink_panel.PanelThread(rec, panel_cfg)
+            rec.panel = eink_panel.PanelThread(rec, cfg)
             rec.panel.start()
         except Exception as exc:                          # noqa: BLE001
             logger.error("Panel unavailable ({}); recording anyway", exc)

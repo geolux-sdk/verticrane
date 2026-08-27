@@ -6,7 +6,10 @@
 #
 # The panel keeps its image without power, so this is not only a status display:
 # it is the label on the device. A unit sitting switched off on site still says
-# which sensor it is, which way up it goes, and not to turn it after mounting.
+# which sensor it is, where it belongs on the crane, and which way up it goes.
+#
+# It shows readings but never judges them. Whether a tilt is acceptable is for
+# the server that collects the recordings to decide; this device records.
 #
 # That is also why it refreshes once a minute and no faster. A full refresh takes
 # about 1.4 s and the panel is rated in refresh count -- at 1 Hz it would be worn
@@ -32,8 +35,7 @@ HEIGHT: int = 200
 
 # Layout bands. Kept as constants because 200x200 leaves no room to guess.
 TITLE_H: int = 26
-WARN_Y: int = 171
-FOOT_Y: int = 150
+FOOT_Y: int = 168
 
 # The Pi carries DejaVu; the Windows entries exist only so the layout can be
 # previewed off the device. Falling through to the bitmap default silently
@@ -54,8 +56,6 @@ _KOREAN_CANDIDATES: tuple[str, ...] = (
     "C:/Windows/Fonts/malgun.ttf",
 )
 
-WARNING_KO: str = "설치 후 방향 변경 금지"
-WARNING_EN: str = "DO NOT REORIENT AFTER FITTING"
 CONTACT_KO: str = "접촉면"
 CONTACT_EN: str = "CONTACT"
 
@@ -90,8 +90,8 @@ def _font(size: int, bold: bool = False, korean: bool = False):
 def _label(text_ko: str, text_en: str) -> tuple[str, bool]:
     """Korean if a font can draw it, else the English stand-in.
 
-    Losing the warning entirely would be worse than showing it in English, so
-    this never fails -- it just says so once in the log.
+    Never fails: a caption in the wrong language still says something, whereas
+    a row of boxes says nothing. It just notes the missing font once in the log.
     """
     global _warned_no_korean
     if korean_font_path():
@@ -188,14 +188,12 @@ STATE_SHORT: dict[str, str] = {
 }
 
 
-def render(status: dict[str, Any], threshold_pct: float = 0.1,
-           contact_face: str = "bottom") -> Image.Image:
+def render(status: dict[str, Any], contact_face: str = "bottom") -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 255)
     d = ImageDraw.Draw(img)
 
     tilt: Optional[float] = status.get("tilt_pct")
     position: str = status.get("position") or "UNSET"
-    alarm: bool = tilt is not None and tilt > threshold_pct
 
     # --- title bar: who this device is -----------------------------------
     d.rectangle([0, 0, WIDTH - 1, TITLE_H - 1], fill=0)
@@ -214,37 +212,30 @@ def render(status: dict[str, Any], threshold_pct: float = 0.1,
     else:
         d.text((92, TITLE_H + 14), "{0:.3f}".format(tilt), font=_font(30, bold=True), fill=0)
         d.text((92, TITLE_H + 48), "%  tilt", font=_font(12), fill=0)
-    if alarm:
-        d.rectangle([90, TITLE_H + 66, WIDTH - 4, TITLE_H + 86], fill=0)
-        _centre(d, TITLE_H + 69, "ALARM", _font(14, bold=True), 255, 90, WIDTH - 4)
-    elif status.get("state") == "recording":
-        _centre(d, TITLE_H + 69, "REC {0}".format(_hms(status.get("elapsed_s", 0))),
-                _font(13, bold=True), 0, 90, WIDTH - 4)
+    # No judgement here: whether a reading is acceptable is decided by the
+    # server that collects the files. This device records and hands over.
+    if status.get("state") == "recording":
+        _centre(d, TITLE_H + 66, "REC {0}".format(_hms(status.get("elapsed_s", 0))),
+                _font(15, bold=True), 0, 90, WIDTH - 4)
 
     # --- angles and running totals ---------------------------------------
-    d.line([4, FOOT_Y - 32, WIDTH - 5, FOOT_Y - 32], fill=0, width=1)
-    small = _font(11)
+    d.line([4, FOOT_Y - 38, WIDTH - 5, FOOT_Y - 38], fill=0, width=1)
+    small = _font(13)
     roll, pitch = status.get("roll"), status.get("pitch")
-    d.text((5, FOOT_Y - 29), "R {0}  P {1}".format(_deg(roll), _deg(pitch)), font=small, fill=0)
-    d.text((5, FOOT_Y - 17), "{0}  {1} smp  {2}".format(
+    d.text((5, FOOT_Y - 34), "R {0}   P {1}".format(_deg(roll), _deg(pitch)),
+           font=small, fill=0)
+    d.text((5, FOOT_Y - 18), "{0}  {1} smp  {2}".format(
         STATE_SHORT.get(str(status.get("state")), "?"),
         status.get("samples", 0), _temp(status.get("temp_c"))), font=small, fill=0)
 
     # --- how to reach it, and when this was drawn -------------------------
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
-    tiny = _font(10)
-    d.text((5, FOOT_Y + 4), status.get("ip") or "NO NETWORK", font=tiny, fill=0)
+    tiny = _font(12)
+    d.text((5, FOOT_Y + 6), status.get("ip") or "NO NETWORK", font=tiny, fill=0)
     stamp: str = time.strftime("%H:%M:%S")
     if status.get("time_quality") not in af.TRUSTED_QUALITIES:
         stamp += " ?"      # the clock is not trusted; the file name says so too
-    _right(d, WIDTH - 5, FOOT_Y + 4, stamp, tiny, 0)
-
-    # --- the warning that has to outlive the power ------------------------
-    d.rectangle([0, WARN_Y, WIDTH - 1, HEIGHT - 1], fill=0)
-    text, ko = _label(WARNING_KO, WARNING_EN)
-    font = _fit(d, text, WIDTH - 10, 16, bold=True, korean=ko)
-    bbox = d.textbbox((0, 0), text, font=font)
-    _centre(d, WARN_Y + (HEIGHT - WARN_Y - (bbox[3] - bbox[1])) // 2 - bbox[1], text, font, 255)
+    _right(d, WIDTH - 5, FOOT_Y + 6, stamp, tiny, 0)
 
     if position == "UNSET":
         # Same signal the filename carries, made visible on site.
@@ -372,9 +363,7 @@ class PanelThread:
         if key == self._last_key:
             return
         self._last_key = key
-        show(render(status,
-                    threshold_pct=float(self.cfg.get("slope_threshold_pct", 0.1)),
-                    contact_face=str(self.cfg.get("contact_face", "bottom"))))
+        show(render(status, contact_face=str(self.cfg.get("contact_face", "bottom"))))
 
 
 def main() -> int:
@@ -383,7 +372,6 @@ def main() -> int:
     parser.add_argument("--position", default="TOP", choices=["UNSET", "BASE", "MIDDLE", "TOP"])
     parser.add_argument("--contact-face", default="bottom",
                         choices=["bottom", "top", "left", "right"])
-    parser.add_argument("--alarm", action="store_true", help="Render the alarm state.")
     parser.add_argument("--scale", type=int, default=1, help="Enlarge the PNG for review.")
     args = parser.parse_args()
 
@@ -391,7 +379,7 @@ def main() -> int:
         "sensor_id": socket.gethostname()[:16],
         "position": args.position,
         "state": "recording",
-        "tilt_pct": 0.842 if args.alarm else 0.062,
+        "tilt_pct": 0.062,
         "roll": -1.086, "pitch": -0.061, "temp_c": 26.3,
         "samples": 12475, "elapsed_s": 8123,
         "time_quality": af.QUALITY_SYNCED,

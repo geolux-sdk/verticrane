@@ -62,8 +62,8 @@
   </table></div>
 
   <p class="small muted" style="margin:14px 0 0">
-    기록 중에는 진행 중인 기록이 시작할 때의 기준을 그대로 씁니다.
-    새 값은 다음 안정화 판정부터 적용됩니다.
+    설치 위치를 바꾸면 <b>다음 기록부터</b> 적용됩니다. 진행 중인 기록의
+    파일명과 헤더는 그대로입니다.
   </p>
 
   <div style="display:flex; gap:10px; align-items:center; margin-top:16px">
@@ -74,11 +74,17 @@
 </form>
 
 <div class="card">
-  <h2>화면에서 바꿀 수 없는 것</h2>
+  <h2>여기서 바꿀 수 없는 것</h2>
   <p class="small muted" style="margin:0">
-    시리얼 포트, 데이터 경로, PINCODE는 여기서 다루지 않습니다.
-    e-paper 갱신 주기도 고정입니다 — 초 단위로 낮추면 패널 수명이 약 2주 만에 소진됩니다.
-    이런 항목은 SSH로 접속해 다뤄야 합니다.
+    안정화 판정 기준, 샘플레이트, 파일 분할 주기, 시리얼 포트, 데이터 경로,
+    PINCODE는 이 화면에 없습니다. 공학적으로 정해진 값이라 현장에서 바꿀 것이
+    아니고, 특히 <b>안정화 기준을 잘못 만지면 기록이 아예 시작되지 않거나
+    흔들리는 중에 시작됩니다.</b>
+    필요하면 SSH로 접속해 <code>config.json</code>에서 다룹니다.
+  </p>
+  <p class="small muted" style="margin:10px 0 0">
+    <b>이 장비는 판정하지 않습니다.</b> 기울기가 괜찮은지는 파일을 가져가는
+    서버가 정합니다. 여기서는 기록해서 넘기는 것까지만 합니다.
   </p>
 </div>
 {% endblock %}
