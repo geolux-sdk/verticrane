@@ -2,10 +2,49 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run Verticrane Test",
-            "type": "python",
+            "name": "Format self-check (no hardware)",
+            "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test.py",
+            "program": "${workspaceFolder}/test_ahrs_file.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Stability self-check (no hardware)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_stability.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Panel preview (writes panel.png)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/eink_panel.py",
+            "args": ["--out", "panel.png", "--scale", "3"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Recorder (needs a sensor)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/recorder.py",
+            "args": ["--force", "waiting_stable", "--seconds", "60", "--no-panel"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Dashboard self-check (dev)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/dev/test.py",
+            "args": ["--no-hardware"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": true

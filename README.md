@@ -254,6 +254,8 @@ python eink_panel.py --position BASE --alarm      # 실제 패널에 그리기
 | `configure_sensor.py` | 센서 설정 (6축 알고리즘, baud) |
 | `eink_status.py`, `eink_test.py` | 패널 시험 도구 |
 | `test.py` | 대시보드 자가 점검 |
+| `verticrane-dashboard.service` | 옛 운영 서비스. 참고용으로만 남겨 둠 |
+| `install_requirements.bat` | Windows 개발 환경 설치 |
 
 ## 자가 점검
 
@@ -278,3 +280,10 @@ python test_stability.py     # 판정: 0/360 경계, 윈도우, 움직임 거부
 - **센서 연결 실패** — 기록기가 포트를 쓰고 있지 않은지(`devmode.sh` 사용),
   `dialout` 그룹에 들어 있는지, 8·10번 핀 결선과 RS-485 A/B 극성을 확인하세요.
 - **e-paper 한글이 네모로 나옴** — `sudo apt install -y fonts-nanum`.
+- **웹이 응답하는지 빠르게 보기** — `curl localhost:8080/healthz`. 이 요청은
+  운영자 접속으로 세지 않으므로 자동 기록을 막지 않습니다.
+
+> **무응답 감시(워치독)는 두지 않았습니다.** HTTP 응답 확인은 이 시스템에서
+> 잘못된 지표입니다 — 웹과 기록이 별도 스레드라, 기록이 멈춰도 웹은 200을
+> 돌려주고 반대로 웹만 막히면 멀쩡한 기록을 재시작해 버립니다. systemd의
+> `Restart=always`가 프로세스 사망만 처리합니다.
