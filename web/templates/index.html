@@ -2,23 +2,15 @@
 {% block body %}
 
 {% set STATE_LABEL = {"waiting_http": "접속 대기", "waiting_stable": "안정화 대기",
-                      "recording": "기록 중", "maintenance": "대기 (유지보수)"} %}
+                      "recording": "기록 중", "maintenance": "대기 (접속됨)"} %}
 
 <div class="card">
   <h2>상태</h2>
   {% if status %}
   <div class="grid">
     <div class="stat">
-      <b id="v-state">{{ STATE_LABEL.get(status.state, status.state) }}</b>
-      <span id="v-file">{% if status.state == "recording" %}{{ status.file }}{% else %}기록하지 않는 중{% endif %}</span>
-    </div>
-    <div class="stat">
-      <b><span id="v-tilt">{{ "%.4f"|format(status.tilt) if status.tilt is not none else "-" }}</span><span style="font-size:13px"> %</span></b>
-      <span>현재 기울기</span>
-    </div>
-    <div class="stat">
-      <b id="v-samples">{{ status.samples }}</b>
-      <span>샘플 · <span id="v-elapsed">{{ "%.0f"|format(status.elapsed_s) }}</span> 초</span>
+      <b>{{ STATE_LABEL.get(status.state, status.state) }}</b>
+      <span>{% if status.state == "recording" %}{{ status.file }}{% else %}기록하지 않는 중{% endif %}</span>
     </div>
     <div class="stat">
       <b>{{ "%.0f"|format(stats.free_mb) }}<span style="font-size:13px"> MB</span></b>
@@ -36,9 +28,6 @@
     {% else %}
       <span class="pill warn">{{ status.time_quality }}</span>
       <span class="muted">— 아직 맞지 않았습니다. 네트워크가 있으면 곧 자동으로 맞춰집니다.</span>
-    {% endif %}
-    {% if status.temp_c is not none %}
-      &nbsp; 온도 <b>{{ "%.1f"|format(status.temp_c) }} ℃</b>
     {% endif %}
     {% if status.device_serial %}
       <br><span class="muted">센서 번호 {{ status.device_serial }}</span>
@@ -59,27 +48,9 @@
 
   {% for w in status.config_warnings %}
     <div class="notice bad" style="margin-top:12px">
-      센서 설정: {{ w }} — <code>configure_sensor.py</code>를 실행해야 합니다.
+      센서 설정: {{ w }} — <code>dev/configure_sensor.py</code>를 실행해야 합니다.
     </div>
   {% endfor %}
-
-  {% if status.stability and status.stability.metrics %}
-    <p class="small muted" style="margin:12px 0 4px">
-      안정화 판정: {{ status.stability.reason }}
-    </p>
-    <div class="wrap"><table>
-      <tr><th>지표</th><th class="num">측정값</th><th class="num">기준</th><th>판정</th></tr>
-      {% for m in status.stability.metrics %}
-      <tr>
-        <td>{{ m.label }}</td>
-        <td class="num">{{ "%.4g"|format(m.value) }}{{ m.unit }}</td>
-        <td class="num">{{ m.limit }}{{ m.unit }}</td>
-        <td>{% if m.ok %}<span class="pill ok">통과</span>
-            {% else %}<span class="pill bad">초과</span>{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </table></div>
-  {% endif %}
 
   <p style="margin:16px 0 0">
     {% if status.state == "recording" %}
@@ -87,6 +58,7 @@
     {% else %}
       <button class="primary" onclick="post('/api/record/start')">지금 기록 시작</button>
     {% endif %}
+    <a class="btn" href="{{ url_for('index') }}" style="margin-left:6px">새로 고침</a>
   </p>
   {% else %}
     <p class="muted">기록기가 연결되어 있지 않습니다.</p>
@@ -101,10 +73,8 @@
   {% else %}
     <div class="wrap"><table>
       <tr>
-        <th>파일 이름</th><th class="num">길이</th><th class="num">샘플</th>
-        <th class="num">크기</th><th></th>
+        <th>파일 이름</th><th class="num">길이</th><th class="num">크기</th><th></th>
       </tr>
-      {% set ns = namespace(seen=[]) %}
       {% for f in files %}
       <tr>
         <td>
@@ -120,10 +90,14 @@
           </div>
         </td>
         <td class="num">{{ "%.0f"|format(f.duration_s) }} 초</td>
-        <td class="num">{{ f.samples }}</td>
         <td class="num">{{ "%.1f"|format(f.size / 1048576) }} MB</td>
         <td class="num">
-          <button class="btn" onclick="collect(this, '/api/files/{{ f.name }}', '{{ f.name }}')">받기</button>
+          {# A plain link, so the browser does the download itself. Reading the
+             file into a blob first let the page confirm delivery, but a download
+             that does not happen is worse than one retired a moment early --
+             and the file sits in the trash for days either way. #}
+          <a class="btn" href="/api/files/{{ f.name }}" download
+             onclick="collected('{{ f.name }}')">받기</a>
         </td>
       </tr>
       {% endfor %}
@@ -133,102 +107,37 @@
       <p class="small muted" style="margin:12px 0 0">
         시간이 이어지는 파일은 하나로 합쳐 받을 수 있습니다:
         {% for g in files|map(attribute='group')|unique|sort %}
-          <button class="btn" onclick="collect(this, '/api/groups/{{ g }}', '')">그룹 {{ g }}</button>
+          <a class="btn" href="/api/groups/{{ g }}" download
+             onclick="collected(null, {{ g }})">그룹 {{ g }}</a>
         {% endfor %}
       </p>
     {% endif %}
 
     <p class="small muted" style="margin:12px 0 0">
-      파일을 끝까지 받으면 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
-      전송이 중간에 끊기면 그대로 남으니 다시 받으면 됩니다.
+      받은 파일은 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
       {% if stats.trashed %} 현재 휴지통 {{ stats.trashed }}개.{% endif %}
     </p>
   {% endif %}
 </div>
 
 <script>
-// While recording, the page refreshes itself so the sample count climbs without
-// the operator tapping anything. That refresh has to stand down during a
-// download: reloading mid-transfer tears down the fetch, and a file of any size
-// takes longer than the interval. The timer is armed at the bottom of this
-// script and cleared here.
-let refreshTimer = null;
-
-// The browser confirms it has the file; the server cannot tell on its own.
-// A finished response only means the bytes reached the socket, and a small
-// file leaves in one write long before it is delivered. So the whole body is
-// read here first, saved, and only then is the file retired on the device.
-async function collect(btn, url, name) {
-  const label = btn.textContent;
-  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
-  btn.disabled = true; btn.textContent = '받는 중…';
-  try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const filename = (r.headers.get('content-disposition') || '')
-      .match(/filename="?([^"]+)"?/)?.[1] || name || 'recording.ahrsbin';
-    const blob = await r.blob();          // throws if the connection drops
-    save(blob, filename);
-    await fetch(url + '/collected', {method: 'POST'});
-    location.reload();
-  } catch (e) {
-    btn.disabled = false; btn.textContent = label;
-    alert('전송이 끊겼습니다. 파일은 그대로 있으니 다시 받으세요.
-' + e.message);
-    armRefresh();
-  }
+// The browser is already downloading by the time this runs -- the link is not
+// cancelled -- so this only tells the device the file has been collected.
+// A native download is independent of the page, so the reload does not disturb it.
+function collected(name, group) {
+  var url = name
+    ? '/api/files/' + encodeURIComponent(name) + '/collected'
+    : '/api/groups/' + group + '/collected';
+  fetch(url, {method: 'POST'})
+    .then(function () { setTimeout(function () { location.reload(); }, 2000); })
+    .catch(function () {});
 }
 
-// Two well-known traps here, both of which silently produce no download:
-//  - the anchor has to be in the document before click() for some browsers;
-//  - revoking the object URL immediately after click() can pull the blob out
-//    from under a download that has not started reading it yet.
-function save(blob, filename) {
-  const href = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = filename;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(href); }, 30000);
+function post(url) {
+  fetch(url, {method: 'POST'})
+    .then(function (r) { return r.json().catch(function () { return {}; }); })
+    .then(function () { location.reload(); })
+    .catch(function (e) { alert('실패했습니다: ' + e.message); });
 }
-
-// Poll rather than reload the page. A reload tears down any download in
-// flight, and a plain request would read as "the operator is here" and stop the
-// recording -- hence ?auto=1, which the server ignores for that purpose.
-async function armRefresh() {
-  if (!AUTO_REFRESH || refreshTimer) return;
-  refreshTimer = setTimeout(async () => {
-    refreshTimer = null;
-    try {
-      const r = await fetch('/api/status?auto=1');
-      const d = await r.json();
-      if (d.state !== RENDERED_STATE) { location.reload(); return; }
-      set('v-tilt', d.tilt_pct === null ? '-' : d.tilt_pct.toFixed(4));
-      set('v-samples', d.samples);
-      set('v-elapsed', Math.round(d.elapsed_s));
-      set('v-file', d.file || '기록하지 않는 중');
-    } catch (e) { /* the vehicle drove off; try again next tick */ }
-    armRefresh();
-  }, 5000);
-}
-
-function set(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
-}
-
-async function post(url) {
-  const r = await fetch(url, {method: 'POST'});
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(j.error || '실패했습니다.'); return; }
-  location.reload();
-}
-// The page is a snapshot; refresh it while a recording is running so the
-// operator can watch the sample count climb without tapping anything.
-const AUTO_REFRESH = {% if status and status.state in ("recording", "waiting_stable") %}true{% else %}false{% endif %};
-const RENDERED_STATE = {{ (status.state if status else "")|tojson }};
-armRefresh();
 </script>
 {% endblock %}
