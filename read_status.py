@@ -72,15 +72,18 @@ def signed16(value: int) -> int:
 
 
 def decode_numberid(device: HWT9037_485) -> Optional[str]:
-    # Device serial number lives in 0x7F~0x84, high byte first within each register.
+    # Device serial number lives in 0x7F~0x84, LOW byte first within each register.
+    # Modbus is big-endian on the wire, so high-byte-first looks like the obvious
+    # reading -- but it produces a plausible-looking string that does not match the
+    # label on the device. 0x5457 0x3234 is "WT42", not "TW24".
     chars: list[str] = []
     for addr in range(0x7F, 0x85):
         raw: Optional[int] = device.registerData.get(addr)
         if raw is None:
             return None
-        chars.append(chr((raw >> 8) & 0xFF))
         chars.append(chr(raw & 0xFF))
-    return "".join(chars)
+        chars.append(chr((raw >> 8) & 0xFF))
+    return "".join(chars).rstrip("\x00 ")
 
 
 def fmt(label: str, value: Any) -> None:
