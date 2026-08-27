@@ -420,12 +420,16 @@ class Recorder:
         if self.state == RECORDING and not verdict.stable:
             # Marks the blocks written from here until it settles again.
             self._block_flags |= af.FLAG_UNSTABLE
-            self._unstable_since = self._unstable_since or time.monotonic()
-            if self.cfg["stop_on_unstable"]:
+            if not self._unstable_since:
+                self._unstable_since = time.monotonic()
                 logger.warning("Unstable while recording: {}", verdict.reason)
+            if self.cfg["stop_on_unstable"]:
                 self._stop_recording()
                 self._set_state(WAITING_STABLE)
         elif self.state == RECORDING:
+            if self._unstable_since:
+                logger.info("Settled again after {:.1f}s",
+                            time.monotonic() - self._unstable_since)
             self._unstable_since = 0.0
 
     def _poll_once(self, record: bool) -> None:
@@ -548,10 +552,10 @@ class Recorder:
         self.writer = None
         logger.info("Stopped recording {} ({} blocks, {} samples)",
                     os.path.basename(path), self.status.blocks, self.status.samples)
-        # Graceful stop is the rare path; it runs the same recovery the next
-        # boot would have run, so both routes end in the same place.
+        # Same finalising logic the next boot would have run, but this file was
+        # closed in an orderly way, so it does not carry the .recovered mark.
         try:
-            af.recover_partial(path)
+            af.recover_partial(path, mark_recovered=False)
         except (OSError, af.FormatError, ValueError) as exc:
             logger.error("Could not finalise {}: {}", os.path.basename(path), exc)
         self._record_start_mono = 0.0

@@ -433,12 +433,17 @@ def effective_start(path: str) -> tuple[float, str]:
 # Recovery
 # --------------------------------------------------------------------------
 
-def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None) -> Optional[str]:
+def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
+                    mark_recovered: bool = True) -> Optional[str]:
     """Verify a leftover .partial, trim the torn tail, and give it its final name.
 
     This is the normal end of a recording: in the field the power simply drops,
     so nothing gets finalised at shutdown (section 6). Returns the new path, or
     None if the file was unusable and got moved aside.
+
+    mark_recovered=False is for the rare orderly stop, where the tail is known
+    to be complete. The .recovered mark means "this file lost its end", so
+    putting it on a cleanly closed file would misinform the operator.
     """
     directory: str = os.path.dirname(os.path.abspath(partial_path))
     base: str = os.path.basename(partial_path)
@@ -480,7 +485,8 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None) -> Opt
         logger.warning("{}: no time correction available; staying unsynced", base)
 
     boot_count: int = int(info.get("boot_count", 0)) if info else 0
-    final_name: str = build_filename(start_epoch, quality, boot_count, recovered=True)
+    final_name: str = build_filename(start_epoch, quality, boot_count,
+                                     recovered=mark_recovered)
     final_path: str = os.path.join(directory, final_name)
     final_path = _unique_path(final_path)
 
