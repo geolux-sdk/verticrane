@@ -5,7 +5,8 @@
       "Bash(python -c \"import ast;ast.parse\\(open\\('recorder.py',encoding='utf-8'\\).read\\(\\)\\);print\\('syntax ok'\\)\")",
       "Bash(ssh -T pi@192.168.0.19 'cd ~/verticrane && ./update.sh >/dev/null 2>&1 && sudo -n systemctl restart verticrane-recorder && sleep 4 *)",
       "Bash(python -c \"import ast;ast.parse\\(open\\('eink_panel.py',encoding='utf-8'\\).read\\(\\)\\);print\\('syntax ok'\\)\")",
-      "Bash(ssh -T pi@192.168.0.19 'cd ~/verticrane && ./update.sh >/dev/null 2>&1 && sudo -n systemctl restart verticrane-recorder *)"
+      "Bash(ssh -T pi@192.168.0.19 'cd ~/verticrane && ./update.sh >/dev/null 2>&1 && sudo -n systemctl restart verticrane-recorder *)",
+      "Bash(ssh -T pi@192.168.0.19 'cd ~/verticrane && ./update.sh >/dev/null 2>&1 && sudo -n systemctl restart verticrane-recorder && sleep 3 *)"
     ]
   }
 }

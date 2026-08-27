@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import os
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -229,7 +228,7 @@ def pick_screen(status: dict[str, Any]) -> str:
 
 
 def render(status: dict[str, Any], contact_face: str = "bottom",
-           rotate: int = 90, ssid: Optional[str] = None) -> Image.Image:
+           rotate: int = 90) -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 255)
     d = ImageDraw.Draw(img)
 
@@ -241,7 +240,7 @@ def render(status: dict[str, Any], contact_face: str = "bottom",
         _body_measure(d, status)
     else:
         _body_install(d, contact_face)
-    _footer(d, status, ssid)
+    _footer(d, status)
 
     transpose = ROTATIONS.get(rotate % 360)
     return img.transpose(transpose) if transpose else img
@@ -290,28 +289,22 @@ def _body_brand(d: ImageDraw.ImageDraw) -> None:
     _centre(d, TITLE_H + 96, "verticrane", _font(15), 0)
 
 
-def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any],
-            ssid: Optional[str]) -> None:
-    """How to reach it. No clock: an unsynced one would be worse than none.
+def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    """The address, which is the only thing here anyone types.
 
-    The SSID is inverted while the device is actually on that network. Joined or
-    not is the first thing an operator wants to know when the page will not
-    load, and a solid bar answers it across a site without reading anything.
+    No clock: an unsynced one is worse than none, and the trustworthy time is in
+    the filename. No SSID either -- connected, the operator is already on that
+    network and knows it; disconnected, there is no network it "should" join,
+    since NetworkManager takes whichever is in range. This line answers the
+    question that has an answer: reachable, and at what address.
     """
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
     ip: Optional[str] = status.get("ip")
-    d.text((5, FOOT_Y + 4), ip or "NO NETWORK", font=_font(15, bold=bool(ip)), fill=0)
-    if not ssid:
-        return
-
-    label: str = "wifi " + ssid
-    font = _fit(d, label, WIDTH - 16, 14)
-    y: int = FOOT_Y + 23
     if ip:
-        d.rectangle([4, y - 2, WIDTH - 5, y + 17], fill=0)
-        d.text((8, y), label, font=font, fill=255)
+        _centre(d, FOOT_Y + 10, ip, _fit(d, ip, WIDTH - 12, 22, bold=True), 0)
     else:
-        d.text((8, y), label, font=font, fill=0)
+        d.rectangle([4, FOOT_Y + 6, WIDTH - 5, FOOT_Y + 34], fill=0)
+        _centre(d, FOOT_Y + 10, "NO NETWORK", _font(18, bold=True), 255)
 
 
 def _temp(value: Optional[float]) -> str:
@@ -321,55 +314,6 @@ def _temp(value: Optional[float]) -> str:
 def _hms(seconds: float) -> str:
     s = int(seconds)
     return "{0:d}:{1:02d}:{2:02d}".format(s // 3600, (s // 60) % 60, s % 60)
-
-
-def wifi_label(configured: str = "", connected: bool = False) -> Optional[str]:
-    """What to print on the wifi line, and only what can be stated as fact.
-
-    Connected, the SSID is certain and worth naming. Disconnected with several
-    profiles saved, there is no "the network it should join" -- NetworkManager
-    takes whichever is in range, so naming one would present a guess as a fact.
-    In that case the count is said instead, and BLE is where the list belongs.
-
-    One saved profile is the exception: there is nothing to be ambiguous about.
-    """
-    if configured:
-        return configured
-    try:
-        # TIMESTAMP is when the profile was last used. Once a second network is
-        # saved, taking the first row would show whichever nmcli happened to list
-        # first -- which is not the one the operator should be looking for.
-        out: str = subprocess.run(
-            ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
-            capture_output=True, text=True, timeout=5).stdout
-        saved: list[tuple[int, str]] = []
-        for line in out.splitlines():
-            parts = line.rsplit(":", 2)
-            if len(parts) != 3:
-                continue
-            name, kind, stamp = parts
-            if "wireless" not in kind or not name:
-                continue
-            try:
-                used = int(stamp)
-            except ValueError:
-                used = 0
-            saved.append((used, name))
-        if saved:
-            saved.sort(reverse=True)
-            if connected or len(saved) == 1:
-                return saved[0][1]
-            return "저장 {0}개".format(len(saved))
-    except (OSError, subprocess.SubprocessError):
-        pass
-    try:
-        # The profile contents need root, but the filename is the SSID and the
-        # directory itself is readable.
-        for name in sorted(os.listdir("/etc/NetworkManager/system-connections")):
-            return name.rsplit(".nmconnection", 1)[0]
-    except OSError:
-        pass
-    return None
 
 
 def local_ip() -> Optional[str]:
@@ -478,9 +422,7 @@ class PanelThread:
         self._last_key = key
         show(render(status,
                     contact_face=str(self.cfg.get("contact_face", "bottom")),
-                    rotate=int(self.cfg.get("panel_rotation", 90)),
-                    ssid=wifi_label(str(self.cfg.get("wifi_ssid", "")),
-                                    connected=bool(status["ip"]))))
+                    rotate=int(self.cfg.get("panel_rotation", 90))))
 
 
 def main() -> int:
@@ -510,8 +452,7 @@ def main() -> int:
         demo["state"] = "maintenance"
     elif args.screen == SCREEN_INSTALL:
         demo["state"] = "waiting_stable"
-    img = render(demo, contact_face=args.contact_face, rotate=args.rotate,
-                 ssid=wifi_label(connected=bool(demo["ip"])))
+    img = render(demo, contact_face=args.contact_face, rotate=args.rotate)
 
     if args.out:
         if args.scale > 1:
