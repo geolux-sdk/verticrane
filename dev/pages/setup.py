@@ -5,7 +5,15 @@
 # .streamlit/config.toml). Protected by a PIN; the default is 01023538099 and
 # should be changed on first use below.
 
+import os
+import sys
+
 import streamlit as st
+
+# Streamlit puts this page's folder on sys.path, so climb two levels to
+# reach the runtime modules at the repo root.
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
 
 import app_config
 

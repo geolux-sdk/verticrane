@@ -13,8 +13,14 @@ import csv
 import math
 import os
 import time
+import sys
+
+# dev/ tools live one level down, so put the repo root on the import path
+# before reaching for app_config, ahrs_file and the rest.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import analyze_tilt
+
 from hwt9037_485 import HWT9037_485
 from port_config import add_port_argument, resolve_port
 

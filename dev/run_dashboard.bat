@@ -10,7 +10,7 @@ if %ERRORLEVEL% EQU 0 (
     set "PYTHON_CMD=python"
 )
 
-%PYTHON_CMD% -m streamlit run dashboard.py
+%PYTHON_CMD% -m streamlit run dev\dashboard.py
 if errorlevel 1 (
     echo.
     echo Failed to start the dashboard.

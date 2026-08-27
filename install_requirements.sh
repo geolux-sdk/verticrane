@@ -49,6 +49,20 @@ fi
 "${VENV_PY}" -m pip install --upgrade pip
 "${VENV_PY}" -m pip install -r "${REQUIREMENTS_FILE}"
 
+# The e-paper panel prints a Korean warning. Without a Hangul font it falls
+# back to English rather than drawing boxes, but the label is meant to be read
+# on a Korean site, so install the font if we are allowed to.
+if ! fc-list :lang=ko 2>/dev/null | grep -q .; then
+    echo
+    echo "No Korean font found -- the e-paper panel would fall back to English."
+    if sudo -n true 2>/dev/null; then
+        echo "Installing fonts-nanum..."
+        sudo apt-get install -y fonts-nanum || true
+    else
+        echo "Install it with:  sudo apt install -y fonts-nanum"
+    fi
+fi
+
 echo
 echo "Python libraries installed into ${VENV_DIR}."
 echo "Run the tools with the venv python, e.g.:"

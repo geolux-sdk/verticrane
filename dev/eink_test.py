@@ -13,9 +13,14 @@ from __future__ import annotations
 import argparse
 import os
 import time
+import sys
 
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
+
+# dev/ tools live one level down, so put the repo root on the import path
+# before reaching for app_config, ahrs_file and the rest.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import gdey0154d67 as epd
 

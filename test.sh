@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the dashboard self-test in the project's virtual environment (Linux / Pi).
+# Run every self-check in the project's virtual environment (Linux / Pi).
 # Arguments are passed through, e.g.:  ./test.sh --seconds 10 --port /dev/ttyUSB0
 set -euo pipefail
 
@@ -16,4 +16,9 @@ else
     PYTHON_CMD="python"
 fi
 
-exec "${PYTHON_CMD}" test.py "$@"
+# The runtime suites need no hardware and must always pass.
+"${PYTHON_CMD}" test_ahrs_file.py || exit 1
+"${PYTHON_CMD}" test_stability.py || exit 1
+
+# The dashboard self-check talks to the sensor, so it comes last.
+exec "${PYTHON_CMD}" dev/test.py "$@"

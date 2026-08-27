@@ -870,11 +870,24 @@ sudo systemctl start verticrane-recorder    # 끝나면 되돌리기
 
 - 개발자용 파일들을 `dev/`로 옮겨 운영 코드와 눈으로 구분되게 한다.
   (`dashboard.py`, `pages/setup.py`, `analyze_tilt.py`, `log_tilt.py`,
-  `configure_sensor.py`, `read_status.py`, `eink_test.py`, `gpio_blink.py`, `test.py`)
+  `configure_sensor.py`, `eink_status.py`, `eink_test.py`, `gpio_blink.py`,
+  `test.py`, `run_dashboard.sh`)
+
+  > **`read_status.py`는 옮기지 않는다.** CLI이기도 하지만 `recorder.py`가
+  > `connectAutoBaud()`와 `decode_numberid()`를 쓰는 공용 모듈이다. 옮기면
+  > 기록기가 뜨지 않는다. `hwt9037_485.py`, `port_config.py`, `app_config.py`,
+  > `gdey0154d67.py`도 같은 이유로 루트에 남는다.
+
+  `dev/` 스크립트는 한 단계 아래에 있으므로 루트를 `sys.path`에 넣는 두 줄이
+  파일 앞머리에 들어간다. 마법 같은 부트스트랩 import 대신 명시적으로 두어,
+  왜 필요한지가 문제가 생기는 자리에 그대로 보이게 한다.
 - `verticrane-dashboard.service`는 `systemctl disable`하고, 저장소에는 참고용으로 남긴다.
 - 서비스 중지 → 실행 → 재시작을 한 번에 하는 `dev/devmode.sh`를 만든다.
-  중간에 죽어도 서비스가 되살아나게 `trap`을 건다.
-- `.ahrsbin` → CSV 변환기 `dev/ahrsbin_to_csv.py`를 만든다. 기존 `analyze_tilt.py`가
+  중간에 죽어도, Ctrl-C를 눌러도, 명령이 실패해도 서비스가 되살아나게 `trap`을 건다.
+  **손으로 멈추는 것은 쉽지만 다시 켜는 것을 잊기는 더 쉽고**, 조용히 기록을
+  멈춘 현장 장비가 이 프로젝트에서 가장 나쁜 결과다.
+- `.ahrsbin` → CSV 변환기 `dev/ahrsbin_to_csv.py`를 만든다. `--report`를 주면
+  변환 후 `analyze_tilt.py`까지 돌린다. 기존 `analyze_tilt.py`가
   CSV를 받으므로, 이 변환기 하나로 기존 분석 자산이 새 포맷에 다시 붙는다.
   열은 기존 `log_tilt.py` CSV와 같다: `timestamp, elapsed_s, Roll_deg, Pitch_deg,
   Yaw_deg, slope_pct, AccX_g, AccY_g, AccZ_g, GyroX_dps, GyroY_dps, GyroZ_dps,

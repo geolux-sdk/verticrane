@@ -25,6 +25,10 @@ import streamlit as st
 from loguru import logger
 from plotly.subplots import make_subplots
 
+# dev/ tools live one level down, so put the repo root on the import path
+# before reaching for app_config, ahrs_file and the rest.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import analyze_tilt
 import app_config  # importing app_config also applies the central loguru LOG_LEVEL
 import read_status
