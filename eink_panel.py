@@ -328,7 +328,8 @@ def wifi_ssid(configured: str = "") -> Optional[str]:
 
     Up the crane there is no connection, and that is exactly when the operator
     needs to be told which SSID to look for. So this reports the *saved* profile
-    rather than the active one.
+    rather than the active one -- the most recently used, since that is what
+    NetworkManager will reach for first, with "+N" when others are saved too.
     """
     if configured:
         return configured
@@ -339,7 +340,7 @@ def wifi_ssid(configured: str = "") -> Optional[str]:
         out: str = subprocess.run(
             ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
             capture_output=True, text=True, timeout=5).stdout
-        best: Optional[tuple[int, str]] = None
+        saved: list[tuple[int, str]] = []
         for line in out.splitlines():
             parts = line.rsplit(":", 2)
             if len(parts) != 3:
@@ -351,10 +352,14 @@ def wifi_ssid(configured: str = "") -> Optional[str]:
                 used = int(stamp)
             except ValueError:
                 used = 0
-            if best is None or used > best[0]:
-                best = (used, name)
-        if best is not None:
-            return best[1]
+            saved.append((used, name))
+        if saved:
+            saved.sort(reverse=True)
+            # "+N" when other networks are saved too. The most recently used one
+            # is the best single guess at what the device will rejoin, but it is
+            # a guess -- and a panel that named it alone would read as a fact.
+            extra: str = "  +{0}".format(len(saved) - 1) if len(saved) > 1 else ""
+            return saved[0][1] + extra
     except (OSError, subprocess.SubprocessError):
         pass
     try:
