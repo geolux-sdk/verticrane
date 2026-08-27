@@ -555,14 +555,20 @@ def main():
         )
     adapter_addr = adapters[0].address
 
-    # 광고 이름은 hostname 을 쓴다. 한 크레인에 BASE/MIDDLE/TOP 세 대가 붙으므로,
-    # 선택창에서 어느 장비인지 바로 알아야 한다. hostname 은 파일명의 SENSOR_ID,
-    # 웹 화면 제목, e-paper 상단에 나오는 것과 같은 문자열이라 헷갈릴 여지가 없다.
-    # 광고 패킷이 31바이트뿐이라 이름이 길면 잘리므로, 길면 MAC 뒷자리로 돌아간다.
+    # 이름 = "Pi-BLE-" + hostname (예: Pi-BLE-pi-tilt001).
+    #
+    # 접두사는 웹앱이 선택창을 거르는 기준이라 그대로 둔다 — 광고에는 서비스 UUID 가
+    # 실리지 않으므로(31바이트 한도) 필터가 기댈 것이 이름뿐이다.
+    #
+    # 뒤에 hostname 을 붙이는 이유는 한 크레인에 BASE/MIDDLE/TOP 세 대가 붙기
+    # 때문이다. MAC 뒷자리만으로는 어느 장비인지 알 수 없고, hostname 은 파일명의
+    # SENSOR_ID·웹 화면 제목·e-paper 상단과 같은 문자열이다.
+    #
+    # 한도: Flags AD 3B + 이름 AD (2 + N) <= 31 이므로 이름은 26자까지.
     global LOCAL_NAME
-    fallback = "Pi-BLE-" + adapter_addr.replace(":", "")[-4:].upper()
     host = socket.gethostname()
-    LOCAL_NAME = host if host and len(host) <= 20 else fallback
+    suffix = host if host else adapter_addr.replace(":", "")[-4:].upper()
+    LOCAL_NAME = ("Pi-BLE-" + suffix)[:26]
     print(f"어댑터: {adapter_addr}, 로컬 이름: {LOCAL_NAME}")
 
     # Wi-Fi 쪽이 아예 준비 안 된 환경이면 여기서 미리 알려준다(BLE 는 계속 진행).

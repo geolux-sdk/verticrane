@@ -1278,9 +1278,13 @@
 
     // 처음 보는 장비를 목록에 추가한다. 브라우저 선택창에는 근처에서 광고 중인
     // Pi-BLE-* 가 모두 뜬다(앱이 직접 스캔할 방법은 없다).
+    //
+    // 이름으로 거르는 이유: 광고 패킷 31바이트에 128비트 서비스 UUID(18B)와
+    // 이름을 함께 실을 수 없어 장비가 이름만 광고한다. 그래서 필터가 기댈 것이
+    // 이름뿐이고, 장비 쪽은 "Pi-BLE-" 접두사를 반드시 유지해야 한다.
     async function pickNewDevice() {
       try {
-        log("새 장비 검색 중… (선택창에서 Pi-BLE-XXXX 를 고르세요)");
+        log("새 장비 검색 중… (선택창에서 Pi-BLE-<장비이름> 을 고르세요)");
         const dev = await navigator.bluetooth.requestDevice({
           filters: [{ namePrefix: "Pi-BLE" }],
           optionalServices: [NUS_SERVICE],
