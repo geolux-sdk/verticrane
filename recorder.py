@@ -450,51 +450,50 @@ class Recorder:
         return recovered
 
     def wait_for_http(self, seconds: float) -> bool:
-        """True when a request arrived inside the window (-> maintenance).
+        """Hold before recording. True if an operator connected (-> maintenance).
 
-        The window exists to give an operator a chance to connect before
-        recording starts. **If nothing is associated, nobody can connect, so
-        there is nothing to wait for** -- and the device is almost certainly at
-        the measurement site, where every second not recording is lost data.
+        Two separate reasons to wait, and they must not be confused:
 
-        Starting early costs little now: an operator who connects later gets the
-        open file finalised for them (see note_http_request).
+        **The mount delay always applies.** The operator powers the device on at
+        the bottom and then climbs the tower crane to fit it. Recording during
+        the climb would put the ascent at the head of the file, so nothing starts
+        until they have had time to get up there and mount it. No network is
+        involved -- and no network is exactly the case where this matters.
+
+        **The HTTP window only applies when there is a network.** It gives an
+        operator standing beside the device a chance to connect before recording
+        starts. With nothing associated nobody can connect, so waiting out that
+        window would be time spent for no one.
+        """
+        mount: float = float(self.cfg.get("mount_delay_seconds", 60))
+        if self._hold(mount, "설치 유예"):
+            return True
+
+        if not _link_up():
+            logger.info("No network link; going straight to the measurement")
+            return False
+
+        # Associated: let DHCP finish, then give a full window from the moment
+        # the address actually landed. Counting from boot is what made the
+        # operator miss it while the WiFi was still coming up.
+        self._await_address(float(self.cfg.get("network_wait_seconds", 90)))
+        return self._hold(seconds, "접속 대기")
+
+    def _hold(self, seconds: float, reason: str) -> bool:
+        """Wait, polling the sensor. True if an operator connected meanwhile.
+
+        Polling throughout means the stability window is already warm whichever
+        way the wait ends, so recording can begin the moment the hold expires.
         """
         if seconds <= 0:
-            return False
-
-        if not self._await_link(float(self.cfg.get("link_probe_seconds", 20))):
-            logger.info("No network link; starting the measurement without waiting")
-            return False
-
-        self._await_address(float(self.cfg.get("network_wait_seconds", 90)))
-        logger.info("Waiting {:.0f}s for an HTTP request", seconds)
-        # Keeps polling the sensor so the stability window is already warm if
-        # nobody shows up.
+            return self._http_seen.is_set()
+        logger.info("{} {:.0f}s", reason, seconds)
         deadline: float = time.monotonic() + seconds
         while time.monotonic() < deadline and not self.stop_event.is_set():
             if self._http_seen.is_set():
                 return True
             self._poll_once(record=False)
         return self._http_seen.is_set()
-
-    def _await_link(self, limit: float) -> bool:
-        """Wait for any interface to associate. Fast when an AP is in range.
-
-        Association is the cheap discriminator: it completes in seconds near the
-        vehicle and never at all out at the crane. Waiting for a DHCP address
-        instead would make the no-network case pay the full timeout.
-        """
-        deadline: float = time.monotonic() + limit
-        announced: bool = False
-        while time.monotonic() < deadline and not self.stop_event.is_set():
-            if self._http_seen.is_set() or _link_up():
-                return True
-            if not announced:
-                logger.info("Looking for a network link (up to {:.0f}s)", limit)
-                announced = True
-            self._poll_once(record=False)
-        return _link_up()
 
     def _await_address(self, limit: float) -> None:
         """Once associated, give DHCP time to hand out an address."""
