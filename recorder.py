@@ -339,6 +339,7 @@ class Recorder:
         self._http_seen = threading.Event()
         self._want_start = threading.Event()
         self._want_stop = threading.Event()
+        self._want_discard = threading.Event()
         self._lock = threading.Lock()
         self.fail_on_no_sensor: bool = fail_on_no_sensor
 
@@ -372,20 +373,27 @@ class Recorder:
     # -- external hooks ---------------------------------------------------
 
     def note_http_request(self) -> None:
-        """A valid request arrived. Someone is here to collect files (section 3).
+        """A valid request arrived. Someone is here, so this is not a measurement.
 
-        While recording, that means the operator has come back and wants the
-        file that is still open -- so the recording is finalised for them. The
-        status page's own polling is exempt (it carries ?auto=1), or a browser
-        left open in the vehicle would end a measurement the moment the WiFi
-        came back into range.
+        A recording in progress gets discarded. Reaching the device means being
+        beside it, which is the vehicle, not the crane -- the recording started
+        only because nobody connected inside the boot window, and it is of a box
+        sitting on a bench.
+
+        Discarded means moved to the trash, not deleted: the judgement is about
+        what belongs in the operator's list, and it should not be the kind of
+        judgement that destroys data if it is wrong.
+
+        The status page's own polling is exempt (it carries ?auto=1), or a
+        browser left open in the vehicle would throw away a real measurement the
+        moment the WiFi came back into range.
         """
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
         if self.state == RECORDING:
-            logger.info("Operator connected while recording; finalising the file")
-            self._want_stop.set()
+            logger.info("Operator connected while recording; discarding this recording")
+            self._want_discard.set()
 
     @property
     def position(self) -> int:
@@ -549,6 +557,11 @@ class Recorder:
 
         # Manual control arrives as a flag rather than a direct call: the web
         # runs on another thread, and only this one may touch the open writer.
+        if self._want_discard.is_set():
+            self._want_discard.clear()
+            if self.state == RECORDING:
+                self._stop_recording(discard=True)
+                self._set_state(MAINTENANCE)
         if self._want_stop.is_set():
             self._want_stop.clear()
             if self.state == RECORDING:
@@ -724,7 +737,7 @@ class Recorder:
         self.status.blocks = 0
         self._set_state(RECORDING)
 
-    def _stop_recording(self) -> None:
+    def _stop_recording(self, discard: bool = False) -> None:
         if self.writer is None:
             return
         self._flush_block()
@@ -738,10 +751,18 @@ class Recorder:
                     os.path.basename(path), self.status.blocks, self.status.samples)
         # Same finalising logic the next boot would have run, but this file was
         # closed in an orderly way, so it does not carry the .recovered mark.
+        final: Optional[str] = None
         try:
-            af.recover_partial(path, mark_recovered=False)
+            final = af.recover_partial(path, mark_recovered=False)
         except (OSError, af.FormatError, ValueError) as exc:
             logger.error("Could not finalise {}: {}", os.path.basename(path), exc)
+
+        if discard and final is not None:
+            # Finalised first so what lands in the trash is a valid, readable
+            # file -- recoverable by hand if this turns out to have been wrong.
+            moved = filestore.move_to_trash(self.data_dir, [os.path.basename(final)])
+            if moved:
+                logger.info("Discarded to trash: {}", moved[0])
         self._record_start_mono = 0.0
 
     def _maybe_segment(self) -> None:
