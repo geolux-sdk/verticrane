@@ -444,13 +444,22 @@ class Recorder:
     def wait_for_http(self, seconds: float) -> bool:
         """True when a request arrived inside the window (-> maintenance).
 
-        The countdown starts once the network is up, not at boot. WiFi
-        association takes tens of seconds on this board, and a window that
-        expires before the operator can even reach the device is no window.
+        The window exists to give an operator a chance to connect before
+        recording starts. **If nothing is associated, nobody can connect, so
+        there is nothing to wait for** -- and the device is almost certainly at
+        the measurement site, where every second not recording is lost data.
+
+        Starting early costs little now: an operator who connects later gets the
+        open file finalised for them (see note_http_request).
         """
         if seconds <= 0:
             return False
-        self._wait_for_network(float(self.cfg.get("network_wait_seconds", 90)))
+
+        if not self._await_link(float(self.cfg.get("link_probe_seconds", 20))):
+            logger.info("No network link; starting the measurement without waiting")
+            return False
+
+        self._await_address(float(self.cfg.get("network_wait_seconds", 90)))
         logger.info("Waiting {:.0f}s for an HTTP request", seconds)
         # Keeps polling the sensor so the stability window is already warm if
         # nobody shows up.
@@ -461,28 +470,32 @@ class Recorder:
             self._poll_once(record=False)
         return self._http_seen.is_set()
 
-    def _wait_for_network(self, limit: float) -> bool:
-        """Hold until this machine has a routable address, or give up.
+    def _await_link(self, limit: float) -> bool:
+        """Wait for any interface to associate. Fast when an AP is in range.
 
-        Keeps polling the sensor meanwhile, so the stability window is already
-        warm whichever way the wait ends.
+        Association is the cheap discriminator: it completes in seconds near the
+        vehicle and never at all out at the crane. Waiting for a DHCP address
+        instead would make the no-network case pay the full timeout.
         """
-        if limit <= 0:
-            return False
         deadline: float = time.monotonic() + limit
         announced: bool = False
         while time.monotonic() < deadline and not self.stop_event.is_set():
-            if self._http_seen.is_set():
-                return True
-            if _local_ip() is not None:
-                logger.info("Network up after {:.0f}s", limit - (deadline - time.monotonic()))
+            if self._http_seen.is_set() or _link_up():
                 return True
             if not announced:
-                logger.info("Waiting up to {:.0f}s for the network", limit)
+                logger.info("Looking for a network link (up to {:.0f}s)", limit)
                 announced = True
             self._poll_once(record=False)
-        logger.info("No network; going on without one")
-        return False
+        return _link_up()
+
+    def _await_address(self, limit: float) -> None:
+        """Once associated, give DHCP time to hand out an address."""
+        deadline: float = time.monotonic() + limit
+        while time.monotonic() < deadline and not self.stop_event.is_set():
+            if self._http_seen.is_set() or _local_ip() is not None:
+                return
+            self._poll_once(record=False)
+        logger.warning("Associated but no address after {:.0f}s", limit)
 
     # -- main loop --------------------------------------------------------
 
@@ -813,6 +826,30 @@ class Recorder:
         self.time.save_last_known()
         self.sensor.close()
         logger.info("Recorder stopped")
+
+
+def _link_up() -> bool:
+    """True when some interface other than loopback is associated.
+
+    /sys/class/net/*/carrier is 1 once WiFi has joined an AP, well before DHCP
+    has finished, which is exactly the distinction needed here.
+    """
+    try:
+        names: list[str] = os.listdir("/sys/class/net")
+    except OSError:
+        # Not Linux (a development machine). Fall back to asking for an address,
+        # rather than silently reporting "no network" for want of a sysfs path.
+        return _local_ip() is not None
+    for name in names:
+        if name == "lo":
+            continue
+        try:
+            with open(os.path.join("/sys/class/net", name, "carrier")) as f:
+                if f.read().strip() == "1":
+                    return True
+        except OSError:
+            continue          # down interfaces refuse the read; that is a "no"
+    return False
 
 
 def _local_ip() -> Optional[str]:

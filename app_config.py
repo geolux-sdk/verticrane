@@ -33,7 +33,8 @@ RECORDER_DEFAULTS: dict[str, Any] = {
     # hostname, so it can never be left blank or drift from the address in use.
     "sensor_flag": "unset",                # base / middle / top
     "contact_face": "bottom",              # which face meets the structure
-    "network_wait_seconds": 90,            # hold the boot window until WiFi associates
+    "link_probe_seconds": 20,              # no association in this long = no network here
+    "network_wait_seconds": 90,            # once associated, how long to wait for DHCP
     "http_wait_seconds": 60,               # boot window in which a request suppresses auto-record
     "ntp_retry_interval_seconds": 30,      # how often the background watcher re-checks NTP
     "time_save_interval_seconds": 10,      # how often the last known time is persisted
