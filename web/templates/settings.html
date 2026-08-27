@@ -26,17 +26,17 @@
 {% endif %}
 
 <form method="post">
+{% for title, fields in groups %}
 <div class="card">
-  <h2>설정</h2>
+  <h2>{{ title }}</h2>
   <div class="wrap"><table>
-    <tr><th>항목</th><th style="width:130px">값</th><th>설명</th></tr>
     {% for f in fields %}
     <tr>
-      <td>
+      <td style="width:34%">
         {{ f.label }}
         {% if f.unit %}<span class="muted small">({{ f.unit }})</span>{% endif %}
       </td>
-      <td>
+      <td style="width:120px">
         {% if f.choices %}
           <select name="{{ f.key }}">
             {% for value, label in f.choices %}
@@ -60,11 +60,13 @@
     </tr>
     {% endfor %}
   </table></div>
+</div>
+{% endfor %}
 
-  <p class="small muted" style="margin:14px 0 0">
+<div class="card">
+  <p class="small muted" style="margin:0 0 12px">
     설치 위치를 바꾸면 <b>다음 기록부터</b> 적용됩니다.
   </p>
-
   <div style="display:flex; gap:10px; align-items:center; margin-top:16px">
     <input type="password" name="pin" placeholder="PINCODE" style="max-width:200px" required>
     <button class="primary" type="submit">저장</button>

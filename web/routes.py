@@ -75,7 +75,12 @@ def register(app: Flask) -> None:
 
     @app.get("/settings")
     def settings() -> str:
-        return render_template("settings.html", fields=_FIELDS, cfg=_cfg(),
+        groups: list[tuple[str, list[Field]]] = []
+        for field in _FIELDS:
+            if not groups or groups[-1][0] != field.group:
+                groups.append((field.group, []))
+            groups[-1][1].append(field)
+        return render_template("settings.html", groups=groups, cfg=_cfg(),
                                status=_recorder().snapshot() if _recorder() else None,
                                device_time=time.strftime("%Y-%m-%d %H:%M:%S"),
                                message=request.args.get("m"),
@@ -290,9 +295,13 @@ def _send(paths: list[str], display_name: str,
 class Field:
     def __init__(self, key: str, label: str, kind: type, unit: str = "",
                  low: Optional[float] = None, high: Optional[float] = None,
-                 note: str = "", choices: Optional[list[tuple[str, str]]] = None) -> None:
+                 note: str = "", choices: Optional[list[tuple[str, str]]] = None,
+                 group: str = "") -> None:
         self.key, self.label, self.kind = key, label, kind
         self.unit, self.low, self.high, self.note = unit, low, high, note
+        # Grouped on the page, so the one setting that must not be left alone
+        # does not sit in a list of six that all look equally optional.
+        self.group = group
         # (value, label) pairs. A position typed by hand could be wrong and the
         # mistake would only surface once the file is unattributable.
         self.choices = choices
@@ -316,22 +325,22 @@ class Field:
 
 
 _FIELDS: list[Field] = [
-    Field("sensor_flag", "설치 위치", str, "",
+    Field("sensor_flag", "설치 위치", str, "", group="설치",
           choices=[("unset", "미설정"), ("base", "BASE"),
                    ("middle", "MIDDLE"), ("top", "TOP")],
           note="크레인의 어느 높이인지. 파일명 앞에 붙습니다. "
                "지정하지 않으면 UNSET_ 이 되어 나중에 구분할 수 없습니다."),
-    Field("http_wait_seconds", "접속 대기 시간", int, "초", 5, 600,
+    Field("http_wait_seconds", "접속 대기 시간", int, "초", 5, 600, group="기록",
           note="전원을 켠 뒤 이 시간 안에 접속하면 기록하지 않고 기다립니다. "
                "접속이 없으면 자동으로 기록을 시작합니다."),
-    Field("segment_minutes", "파일 분할 주기", int, "분", 0, 1440,
+    Field("segment_minutes", "파일 분할 주기", int, "분", 0, 1440, group="기록",
           note="0이면 전원이 꺼질 때까지 한 파일에 기록합니다. "
                "값을 주면 그 주기마다 파일을 끊습니다."),
-    Field("delete_after_download", "다운로드한 파일 정리", bool, "",
+    Field("delete_after_download", "다운로드한 파일 정리", bool, "", group="저장 공간",
           note="받은 파일을 목록에서 치웁니다. 아래 기간 동안 휴지통에 남습니다."),
-    Field("trash_retention_days", "휴지통 보관 기간", int, "일", 0, 365,
+    Field("trash_retention_days", "휴지통 보관 기간", int, "일", 0, 365, group="저장 공간",
           note="받은 파일을 이 기간이 지나면 실제로 지웁니다."),
-    Field("min_free_mb", "최소 여유 공간", int, "MB", 50, 100000,
+    Field("min_free_mb", "최소 여유 공간", int, "MB", 50, 100000, group="저장 공간",
           note="이 아래로 내려가면 휴지통부터 비우고, 그래도 모자라면 기록을 멈춥니다."),
 ]
 
