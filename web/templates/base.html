@@ -66,7 +66,16 @@
 </head>
 <body>
 <header>
-  <h1>Verticrane 기록기</h1>
+  {# Three devices sit on one crane and one WiFi. Without this the operator
+     cannot tell which one they are about to reconfigure. #}
+  <h1>{{ status.sensor_id if status and status.sensor_id else "Verticrane 기록기" }}</h1>
+  {% if status %}
+    {% if status.position and status.position != "UNSET" %}
+      <span class="pill ok" style="font-size:14px">{{ status.position }}</span>
+    {% else %}
+      <span class="pill bad" style="font-size:14px">위치 미설정</span>
+    {% endif %}
+  {% endif %}
   <nav>
     <a href="{{ url_for('index') }}">상태</a>
     <a href="{{ url_for('settings') }}">설정</a>

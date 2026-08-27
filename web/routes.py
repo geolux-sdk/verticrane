@@ -119,6 +119,10 @@ def register(app: Flask) -> None:
             return jsonify({"error": "recorder not attached"}), 503
         snap = rec.snapshot()
         return jsonify({
+            "sensor_id": snap.sensor_id,
+            "position": snap.position,
+            "device_serial": snap.device_serial,
+            "config_warnings": snap.config_warnings,
             "state": snap.state,
             "file": snap.file,
             "started_at": snap.started_at,
@@ -281,11 +285,19 @@ def _send(paths: list[str], display_name: str,
 class Field:
     def __init__(self, key: str, label: str, kind: type, unit: str = "",
                  low: Optional[float] = None, high: Optional[float] = None,
-                 note: str = "") -> None:
+                 note: str = "", choices: Optional[list[tuple[str, str]]] = None) -> None:
         self.key, self.label, self.kind = key, label, kind
         self.unit, self.low, self.high, self.note = unit, low, high, note
+        # (value, label) pairs. A position typed by hand could be wrong and the
+        # mistake would only surface once the file is unattributable.
+        self.choices = choices
 
     def parse(self, raw: str) -> Any:
+        if self.choices is not None:
+            allowed = {value for value, _ in self.choices}
+            if raw not in allowed:
+                raise ValueError("{0} 중에서 골라야 합니다".format(", ".join(sorted(allowed))))
+            return raw
         try:
             value: Any = self.kind(raw)
         except ValueError:
@@ -299,6 +311,14 @@ class Field:
 
 
 _FIELDS: list[Field] = [
+    Field("sensor_flag", "설치 위치", str, "",
+          choices=[("unset", "미설정"), ("base", "BASE"),
+                   ("middle", "MIDDLE"), ("top", "TOP")],
+          note="크레인의 어느 높이인지. 파일명 앞에 붙고, 미설정이면 UNSET_ 이 됩니다."),
+    Field("contact_face", "접촉면", str, "",
+          choices=[("bottom", "아랫면"), ("top", "윗면"),
+                   ("left", "왼쪽"), ("right", "오른쪽")],
+          note="구조물에 닿는 면. 패널 그림에 반영됩니다."),
     Field("http_wait_seconds", "HTTP 대기 시간", int, "초", 5, 600,
           "부팅 후 이 시간 안에 접속이 있으면 자동 기록을 하지 않습니다."),
     Field("stability_window_seconds", "안정화 판정 창", float, "초", 1, 120,

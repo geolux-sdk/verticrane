@@ -32,6 +32,7 @@ class FileInfo:
     blocks: int
     trusted: bool                  # False means the timestamp is a guess
     recovered: bool                # True means the tail was lost to a power cut
+    position: str = "UNSET"        # BASE / MIDDLE / TOP
     group: int = 0
 
     @property
@@ -49,6 +50,7 @@ class FileInfo:
             "blocks": self.blocks,
             "trusted_time": self.trusted,
             "recovered": self.recovered,
+            "position": self.position,
             "group": self.group,
         }
 
@@ -107,6 +109,7 @@ def describe(path: str) -> Optional[FileInfo]:
         blocks=blocks,
         trusted=bool(parsed["trusted"]) if parsed else False,
         recovered=bool(parsed["recovered"]) if parsed else False,
+        position=str(parsed["position_name"]) if parsed else "UNSET",
     )
 
 

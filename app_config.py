@@ -29,6 +29,10 @@ DEFAULT_LOG_LEVEL: str = "INFO"
 # AUTO_RUN recorder settings. Kept in the same config.json rather than a second
 # .env file: two stores would mean forever asking which one is in force.
 RECORDER_DEFAULTS: dict[str, Any] = {
+    # Where on the crane this unit sits. SENSOR_ID is not here: it is the Pi's
+    # hostname, so it can never be left blank or drift from the address in use.
+    "sensor_flag": "unset",                # base / middle / top
+    "contact_face": "bottom",              # which face meets the structure
     "http_wait_seconds": 60,               # boot window in which a request suppresses auto-record
     "ntp_retry_interval_seconds": 30,      # how often the background watcher re-checks NTP
     "time_save_interval_seconds": 10,      # how often the last known time is persisted

@@ -1,13 +1,18 @@
 # coding:UTF-8
 # Binary recording format for the AUTO_RUN tilt recorder (.ahrsbin).
 #
-# A file is a 64-byte header followed by fixed 128-byte blocks. One block holds
-# 25 TILT samples plus the temperature that covers them, so the per-sample cost
-# is 5.1 bytes -- about 11 MB/day at 25 Hz.
+# A file is a 64-byte header followed by fixed 1232-byte blocks. One block holds
+# 25 samples of everything the sensor reports -- acceleration, angular velocity,
+# magnetic field and Roll/Pitch/Yaw -- plus the temperature that covers them.
 #
-# The block is defined by sample COUNT, not by elapsed time: a block is written
-# when 25 samples have been collected, however long that took. That is why there
-# is no validity bitmap -- a block never has holes.
+# The block is defined by sample COUNT, not by elapsed time: it goes out when 25
+# samples have been collected, however long that took. That is why there is no
+# validity bitmap -- a block never has holes.
+#
+# Values are stored decoded rather than as raw registers. Raw would be smaller
+# and bit-exact, but the scale factors live in configuration registers (gyro
+# range 0x20, accel range 0x21); change a range and every earlier file needs a
+# different factor. Decoded, the number in the file is the physical quantity.
 #
 # Everything about wall-clock time lives OUTSIDE the binary. The header carries
 # what the device believed at the moment recording started, which may be wrong
@@ -18,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import struct
@@ -31,16 +37,17 @@ from loguru import logger
 MAGIC: bytes = b"AHRSBIN\0"
 FORMAT_VERSION: int = 1
 HEADER_SIZE: int = 64
-BLOCK_SIZE: int = 128
+BLOCK_SIZE: int = 1232
 SAMPLES_PER_BLOCK: int = 25
+FLOATS_PER_SAMPLE: int = 12
 DEFAULT_SAMPLE_RATE_HZ: int = 25
 
-# Header: magic, version, block size, samples/block, rate, start epoch, model,
-# modbus address, baud, reserved, CRC32 over the preceding 60 bytes.
-_HEADER_FMT: str = "<8sHHHHd16sHI14sI"
-# Block: sample count, flags, duration (ms), reserved, elapsed (ms), temperature,
-# 25 tilt values, reserved, CRC32 over the preceding 124 bytes.
-_BLOCK_FMT: str = "<HHHHQf25fII"
+# Header: magic, version, block size, samples/block, rate, start epoch,
+# SENSOR_ID, SENSOR_FLAG, device serial, reserved, CRC32 over the first 60 bytes.
+_HEADER_FMT: str = "<8sHHHHd16sH12s6sI"
+# Block: count, flags, duration (ms), reserved, elapsed (ms), temperature,
+# reserved, 25 x 12 floats, reserved, CRC32 over the first 1228 bytes.
+_BLOCK_FMT: str = "<HHHHQfI{0}fII".format(SAMPLES_PER_BLOCK * FLOATS_PER_SAMPLE)
 
 assert struct.calcsize(_HEADER_FMT) == HEADER_SIZE
 assert struct.calcsize(_BLOCK_FMT) == BLOCK_SIZE
@@ -49,6 +56,16 @@ assert struct.calcsize(_BLOCK_FMT) == BLOCK_SIZE
 FLAG_READ_FAILED: int = 1 << 0    # a serial read failed while filling this block
 FLAG_RECONNECTED: int = 1 << 1    # the serial link was re-established in this block
 FLAG_UNSTABLE: int = 1 << 2       # this stretch was outside the stability limits
+
+# Where on the crane this device sits. Three of them go on one structure, so the
+# position is what tells three otherwise identical recordings apart.
+POS_UNSET: int = 0
+POS_BASE: int = 1
+POS_MIDDLE: int = 2
+POS_TOP: int = 3
+POSITION_NAMES: dict[int, str] = {POS_UNSET: "UNSET", POS_BASE: "BASE",
+                                  POS_MIDDLE: "MIDDLE", POS_TOP: "TOP"}
+POSITION_VALUES: dict[str, int] = {v.lower(): k for k, v in POSITION_NAMES.items()}
 
 # Time quality. Only ever recorded in the filename and the .timeinfo sidecar --
 # never in the header, so a rename can never contradict the file contents.
@@ -62,10 +79,11 @@ EXT: str = ".ahrsbin"
 PARTIAL_SUFFIX: str = ".partial"
 TIMEINFO_SUFFIX: str = ".timeinfo"
 
-# [bNNNN_]YYYYMMDD_HHMMSS[.unsynced][.recovered].ahrsbin  -- checked before any
-# path is opened, so a request can never walk out of the data directory.
+# FLAG_[bNNNN_]YYYYMMDD_HHMMSS[.unsynced][.recovered].ahrsbin -- checked before
+# any path is opened, so a request can never walk out of the data directory.
 FILENAME_RE: re.Pattern[str] = re.compile(
-    r"^(?:b(?P<boot>\d{4,})_)?"
+    r"^(?P<flag>UNSET|BASE|MIDDLE|TOP)_"
+    r"(?:b(?P<boot>\d{4,})_)?"
     r"(?P<stamp>\d{8}_\d{6})"
     r"(?P<unsynced>\.unsynced)?"
     r"(?P<recovered>\.recovered)?"
@@ -87,21 +105,30 @@ class Header:
     # What the device believed when recording started. May be wrong; the
     # filename wins if the two disagree (section 5.2).
     start_epoch: float = 0.0
+    sensor_id: str = ""
+    position: int = POS_UNSET
+    # Read from registers 0x7F~0x84, low byte first within each register. High
+    # byte first also yields a plausible string, which is exactly why getting it
+    # wrong goes unnoticed -- check it against the label on the device.
+    device_serial: str = ""
     sample_rate_hz: int = DEFAULT_SAMPLE_RATE_HZ
     samples_per_block: int = SAMPLES_PER_BLOCK
     block_size: int = BLOCK_SIZE
     version: int = FORMAT_VERSION
-    sensor_model: str = "HWT9037-485"
-    modbus_addr: int = 0x50
-    baud: int = 115200
+
+    @property
+    def position_name(self) -> str:
+        return POSITION_NAMES.get(self.position, "UNSET")
 
     def pack(self) -> bytes:
         body: bytes = struct.pack(
             _HEADER_FMT[:-1],  # everything except the trailing CRC field
             MAGIC, self.version, self.block_size, self.samples_per_block,
             self.sample_rate_hz, self.start_epoch,
-            self.sensor_model.encode("ascii", "replace")[:16],
-            self.modbus_addr, self.baud, b"\0" * 14,
+            self.sensor_id.encode("ascii", "replace")[:16],
+            self.position,
+            self.device_serial.encode("ascii", "replace")[:12],
+            b"\0" * 6,
         )
         return body + struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
 
@@ -110,7 +137,7 @@ class Header:
         if len(raw) != HEADER_SIZE:
             raise FormatError("header is {0} bytes, expected {1}".format(len(raw), HEADER_SIZE))
         (magic, version, block_size, samples_per_block, rate, start_epoch,
-         model, addr, baud, _reserved, crc) = struct.unpack(_HEADER_FMT, raw)
+         sensor_id, position, serial, _reserved, crc) = struct.unpack(_HEADER_FMT, raw)
         if magic != MAGIC:
             raise FormatError("bad magic {0!r}".format(magic))
         if zlib.crc32(raw[:-4]) & 0xFFFFFFFF != crc:
@@ -119,41 +146,82 @@ class Header:
             raise FormatError("unsupported block size {0}".format(block_size))
         return cls(
             start_epoch=start_epoch,
+            sensor_id=sensor_id.rstrip(b"\0").decode("ascii", "replace"),
+            position=position,
+            device_serial=serial.rstrip(b"\0").decode("ascii", "replace"),
             sample_rate_hz=rate,
             samples_per_block=samples_per_block,
             block_size=block_size,
             version=version,
-            sensor_model=model.rstrip(b"\0").decode("ascii", "replace"),
-            modbus_addr=addr,
-            baud=baud,
         )
 
 
 # --------------------------------------------------------------------------
-# Block
+# Sample and block
 # --------------------------------------------------------------------------
+
+@dataclass
+class Sample:
+    """One poll of the sensor: everything readReg(0x34, 15) returns."""
+    acc: tuple[float, float, float] = (0.0, 0.0, 0.0)      # g
+    gyro: tuple[float, float, float] = (0.0, 0.0, 0.0)     # deg/s
+    mag: tuple[float, float, float] = (0.0, 0.0, 0.0)      # LSB
+    roll: float = 0.0                                      # deg
+    pitch: float = 0.0
+    yaw: float = 0.0
+
+    @property
+    def tilt_pct(self) -> float:
+        # Not stored: it is a function of roll and pitch, and a stored copy could
+        # disagree with its own inputs. Computed on the way out instead.
+        return tilt_pct(self.roll, self.pitch)
+
+    def as_floats(self) -> tuple[float, ...]:
+        return self.acc + self.gyro + self.mag + (self.roll, self.pitch, self.yaw)
+
+    @classmethod
+    def from_floats(cls, v: tuple[float, ...]) -> "Sample":
+        return cls(acc=(v[0], v[1], v[2]), gyro=(v[3], v[4], v[5]),
+                   mag=(v[6], v[7], v[8]), roll=v[9], pitch=v[10], yaw=v[11])
+
+
+def tilt_pct(roll_deg: float, pitch_deg: float) -> float:
+    """Combined tilt as a slope percentage, independent of direction.
+
+    The same value log_tilt.py has always written, so old CSVs and new .ahrsbin
+    files mean the same thing.
+    """
+    sx: float = math.tan(math.radians(roll_deg))
+    sy: float = math.tan(math.radians(pitch_deg))
+    return math.hypot(sx, sy) * 100.0
+
 
 @dataclass
 class Block:
     elapsed_ms: int = 0            # elapsed time of the block's FIRST sample
-    tilt: list[float] = field(default_factory=list)
-    temp_c: float = 0.0
+    samples: list[Sample] = field(default_factory=list)
+    temp_c: float = 0.0            # one per block: the sensor updates it at 1 Hz
     duration_ms: int = 0           # first sample -> last sample
     flags: int = 0
 
     @property
     def count(self) -> int:
-        return len(self.tilt)
+        return len(self.samples)
 
     def pack(self) -> bytes:
-        if len(self.tilt) > SAMPLES_PER_BLOCK:
-            raise ValueError("block holds at most {0} samples".format(SAMPLES_PER_BLOCK))
-        # A short block only happens on a graceful stop; pad the unused slots.
-        padded: list[float] = list(self.tilt) + [0.0] * (SAMPLES_PER_BLOCK - len(self.tilt))
+        # Always exactly 25. A block that never filled is dropped rather than
+        # padded, which costs under a second and removes every partial-block
+        # branch from both sides of the format.
+        if len(self.samples) != SAMPLES_PER_BLOCK:
+            raise ValueError("a block holds exactly {0} samples, got {1}".format(
+                SAMPLES_PER_BLOCK, len(self.samples)))
+        values: list[float] = []
+        for sample in self.samples:
+            values.extend(sample.as_floats())
         body: bytes = struct.pack(
             _BLOCK_FMT[:-1],
-            len(self.tilt), self.flags, min(self.duration_ms, 0xFFFF), 0,
-            self.elapsed_ms, self.temp_c, *padded, 0,
+            len(self.samples), self.flags, min(self.duration_ms, 0xFFFF), 0,
+            self.elapsed_ms, self.temp_c, 0, *values, 0,
         )
         return body + struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
 
@@ -166,11 +234,16 @@ class Block:
         if zlib.crc32(raw[:-4]) & 0xFFFFFFFF != struct.unpack_from("<I", raw, BLOCK_SIZE - 4)[0]:
             return None
         values = struct.unpack(_BLOCK_FMT, raw)
-        count, flags, duration, _res0, elapsed, temp = values[:6]
-        tilt = values[6:6 + SAMPLES_PER_BLOCK]
-        if count > SAMPLES_PER_BLOCK:
+        count, flags, duration, _res0, elapsed, temp, _res1 = values[:7]
+        # Anything but a full block is malformed; stop here as if the tail were torn.
+        if count != SAMPLES_PER_BLOCK:
             return None
-        return cls(elapsed_ms=elapsed, tilt=list(tilt[:count]), temp_c=temp,
+        floats = values[7:7 + SAMPLES_PER_BLOCK * FLOATS_PER_SAMPLE]
+        samples: list[Sample] = [
+            Sample.from_floats(floats[i * FLOATS_PER_SAMPLE:(i + 1) * FLOATS_PER_SAMPLE])
+            for i in range(count)
+        ]
+        return cls(elapsed_ms=elapsed, samples=samples, temp_c=temp,
                    duration_ms=duration, flags=flags)
 
     def sample_times_ms(self, sample_rate_hz: int = DEFAULT_SAMPLE_RATE_HZ) -> list[float]:
@@ -187,15 +260,22 @@ class Block:
 # Filenames
 # --------------------------------------------------------------------------
 
-def build_filename(start_epoch: float, quality: str, boot_count: int = 0,
-                   recovered: bool = False, partial: bool = False) -> str:
-    """Compose a filename from a start time and how much that time is trusted."""
+def build_filename(start_epoch: float, quality: str, position: int = POS_UNSET,
+                   boot_count: int = 0, recovered: bool = False,
+                   partial: bool = False) -> str:
+    """Compose a filename from the position, the start time, and how much that
+    time is trusted.
+
+    The position leads: three devices on one crane would otherwise produce the
+    same name and overwrite each other the moment an operator collects all three.
+    """
     stamp: str = time.strftime(_STAMP_FMT, time.localtime(start_epoch))
-    name: str = stamp
+    name: str = POSITION_NAMES.get(position, "UNSET") + "_"
     if quality not in TRUSTED_QUALITIES:
         # The boot counter keeps names unique and orderable when the clock is
         # not usable -- fake-hwclock can restore the same value every boot.
-        name = "b{0:04d}_{1}".format(boot_count, stamp)
+        name += "b{0:04d}_".format(boot_count)
+    name += stamp
     if recovered:
         name += ".recovered"
     if quality not in TRUSTED_QUALITIES:
@@ -207,7 +287,7 @@ def build_filename(start_epoch: float, quality: str, boot_count: int = 0,
 
 
 def parse_filename(name: str) -> Optional[dict]:
-    """Pull the start time and trust level back out of a filename.
+    """Pull the position, start time and trust level back out of a filename.
 
     Returns None when the name does not match exactly, which is also the
     path-traversal guard: no separators or dots can survive this.
@@ -221,6 +301,8 @@ def parse_filename(name: str) -> Optional[dict]:
         return None
     return {
         "start_epoch": start_epoch,
+        "position": POSITION_VALUES.get(m.group("flag").lower(), POS_UNSET),
+        "position_name": m.group("flag"),
         "boot_count": int(m.group("boot")) if m.group("boot") else 0,
         "trusted": m.group("unsynced") is None,
         "recovered": m.group("recovered") is not None,
@@ -310,7 +392,7 @@ class Writer:
         self.samples_written: int = 0
         self._last_fsync: float = time.monotonic()
         new: bool = not os.path.exists(path)
-        self._f: BinaryIO = open(path, "r+b" if not new else "w+b")
+        self._f: BinaryIO = open(path, "w+b" if new else "r+b")
         if new:
             self._f.write(header.pack())
             self._f.flush()
@@ -485,10 +567,9 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
         logger.warning("{}: no time correction available; staying unsynced", base)
 
     boot_count: int = int(info.get("boot_count", 0)) if info else 0
-    final_name: str = build_filename(start_epoch, quality, boot_count,
-                                     recovered=mark_recovered)
-    final_path: str = os.path.join(directory, final_name)
-    final_path = _unique_path(final_path)
+    final_name: str = build_filename(start_epoch, quality, summary.header.position,
+                                     boot_count, recovered=mark_recovered)
+    final_path: str = _unique_path(os.path.join(directory, final_name))
 
     os.replace(partial_path, final_path)
     old_sidecar: str = timeinfo_path(partial_path)
@@ -501,12 +582,13 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
 
 def _unique_path(path: str) -> str:
     # Two recordings can land on the same name when the clock is untrusted and
-    # the boot counter did not advance. Never overwrite an existing recording.
+    # the boot counter did not advance. Never overwrite an existing recording:
+    # data already collected is worth more than a tidy name.
     if not os.path.exists(path):
         return path
-    stem, ext = path[:-len(EXT)], EXT
+    stem: str = path[:-len(EXT)]
     for n in range(2, 1000):
-        candidate: str = "{0}_{1}{2}".format(stem, n, ext)
+        candidate: str = "{0}_{1}{2}".format(stem, n, EXT)
         if not os.path.exists(candidate):
             return candidate
     raise FormatError("cannot find a free name for {0}".format(path))

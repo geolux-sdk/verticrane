@@ -17,10 +17,10 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -46,6 +46,16 @@ SAMPLE_PERIOD_S: float = 1.0 / SAMPLE_RATE_HZ
 TEMP_REFRESH_S: float = 1.0
 ANGLE_BLOCK: tuple[int, int] = (0x34, 15)
 TEMP_REG: tuple[int, int] = (0x43, 1)
+SERIAL_REG: tuple[int, int] = (0x7F, 6)
+
+# Checked once per connection. Getting any of these wrong silently changes what
+# the recorded angles mean, so it is worth saying so at the time rather than
+# leaving the evidence in a file nobody reads until the measurement is over.
+EXPECTED_CONFIG: dict[int, tuple[str, int]] = {
+    0x23: ("설치 방향", 0),      # horizontal
+    0x24: ("알고리즘", 1),       # 6-axis: magnetic interference stays out of attitude
+    0x1F: ("대역폭", 4),         # 10 Hz, which 25 Hz sampling assumes
+}
 
 # States, per section 3.
 WAITING_HTTP: str = "waiting_http"
@@ -55,17 +65,6 @@ MAINTENANCE: str = "maintenance"
 
 RECONNECT_MIN_S: float = 1.0
 RECONNECT_MAX_S: float = 30.0
-
-
-def resultant_slope_pct(roll_deg: float, pitch_deg: float) -> float:
-    """Combined tilt as a slope percentage, independent of direction.
-
-    Same value log_tilt.py has always written, kept identical so old CSVs and
-    new .ahrsbin files mean the same thing.
-    """
-    sx: float = math.tan(math.radians(roll_deg))
-    sy: float = math.tan(math.radians(pitch_deg))
-    return math.hypot(sx, sy) * 100.0
 
 
 # --------------------------------------------------------------------------
@@ -185,6 +184,8 @@ class SensorLink:
         self.device: Optional[HWT9037_485] = None
         self.baud: Optional[int] = None
         self.reconnected: bool = False     # cleared once a block has reported it
+        self.serial: str = ""
+        self.config_warnings: list[str] = []
         self._backoff: float = RECONNECT_MIN_S
         self._next_attempt: float = 0.0
 
@@ -205,7 +206,50 @@ class SensorLink:
         self._backoff = RECONNECT_MIN_S
         self.reconnected = True
         logger.info("Sensor connected on {} at {} bps", self.port, baud)
+        self._read_serial()
+        self.config_warnings = self._verify_config()
         return True
+
+    def _read_serial(self) -> None:
+        """The sensor's own 12-character serial (0x7F~0x84).
+
+        Decoded low byte first -- high byte first also yields a plausible
+        string, which is why the wrong order goes unnoticed. See read_status.
+        """
+        if self.device is None:
+            return
+        try:
+            if self.device.readReg(*SERIAL_REG) is not None:
+                self.serial = read_status.decode_numberid(self.device) or ""
+                logger.info("Sensor serial {}", self.serial)
+        except Exception as exc:                          # noqa: BLE001
+            logger.debug("Could not read the serial: {}", exc)
+
+    def _verify_config(self) -> list[str]:
+        """Compare the sensor's settings with what the recording assumes.
+
+        Never refuses to record: data taken with an odd setting still beats no
+        data, and a person can judge it later. But it must be said now, because
+        by the end of a measurement it is too late to redo it.
+        """
+        warnings: list[str] = []
+        if self.device is None:
+            return warnings
+        for reg, (label, expected) in EXPECTED_CONFIG.items():
+            try:
+                if self.device.readReg(reg, 1) is None:
+                    continue
+            except Exception:                             # noqa: BLE001
+                continue
+            actual: Optional[int] = self.device.registerData.get(reg)
+            if actual is not None and actual != expected:
+                msg: str = "{0} 설정이 다릅니다 (0x{1:02X}: {2} != 기대 {3})".format(
+                    label, reg, actual, expected)
+                warnings.append(msg)
+                logger.warning("{}  -- configure_sensor.py 를 실행하세요", msg)
+        if not warnings:
+            logger.info("Sensor configuration matches expectations")
+        return warnings
 
     def drop(self) -> None:
         if self.device is not None:
@@ -252,6 +296,10 @@ class SensorLink:
 @dataclass
 class Status:
     """Snapshot for /api/status and the e-paper panel."""
+    sensor_id: str = ""
+    position: str = "UNSET"
+    device_serial: str = ""
+    config_warnings: list[str] = field(default_factory=list)
     state: str = WAITING_HTTP
     file: Optional[str] = None
     started_at: Optional[float] = None
@@ -288,9 +336,12 @@ class Recorder:
         self.monitor = stability.StabilityMonitor(
             stability.Limits.from_config({"recorder": cfg}))
 
+        # The Pi's hostname is the device identity: already unique per unit,
+        # already the address the operator types, and impossible to leave blank.
+        self.sensor_id: str = socket.gethostname()[:16]
         self.boot_count: int = af.next_boot_count(data_dir)
         self.writer: Optional[af.Writer] = None
-        self._pending: list[tuple[float, float]] = []   # (elapsed_ms, tilt)
+        self._pending: list[tuple[float, af.Sample]] = []
         self._temp: float = 0.0
         self._block_flags: int = 0
         self._record_start_mono: float = 0.0
@@ -301,7 +352,10 @@ class Recorder:
         self._next_purge: float = 0.0
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
-        logger.info("Boot #{} in {}", self.boot_count, self.data_dir)
+        logger.info("Boot #{} as {} [{}] in {}", self.boot_count, self.sensor_id,
+                    af.POSITION_NAMES.get(self.position, "UNSET"), self.data_dir)
+        if self.position == af.POS_UNSET:
+            logger.warning("SENSOR_FLAG is not set; recordings will be named UNSET_*")
 
     # -- external hooks ---------------------------------------------------
 
@@ -310,6 +364,13 @@ class Recorder:
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
+
+    @property
+    def position(self) -> int:
+        # Read from config each time, so changing it on the settings page takes
+        # effect from the next recording without a restart (section 8).
+        return af.POSITION_VALUES.get(
+            str(self.cfg.get("sensor_flag", "unset")).lower(), af.POS_UNSET)
 
     def request_manual_start(self) -> bool:
         """Web asked to record now. Still waits for the sensor to settle.
@@ -331,6 +392,10 @@ class Recorder:
     def snapshot(self) -> Status:
         with self._lock:
             self.status.state = self.state
+            self.status.sensor_id = self.sensor_id
+            self.status.position = af.POSITION_NAMES.get(self.position, "UNSET")
+            self.status.device_serial = self.sensor.serial
+            self.status.config_warnings = list(self.sensor.config_warnings)
             self.status.sensor_ok = self.sensor.device is not None
             self.status.time_quality = self.time.quality
             self.status.free_mb = _free_mb(self.data_dir)
@@ -492,12 +557,18 @@ class Recorder:
             self._block_flags |= af.FLAG_READ_FAILED
             return
 
-        tilt: float = resultant_slope_pct(roll, pitch)
-        self.status.tilt = tilt
-        self.monitor.add(stability.Sample(
-            t=started, roll=roll, pitch=pitch, yaw=yaw,
+        # Everything one poll returns gets kept: the 15 registers arrive in a
+        # single transaction, so dropping any of it saves no time, only data.
+        sample = af.Sample(
             acc=(data.get("AccX", 0.0), data.get("AccY", 0.0), data.get("AccZ", 0.0)),
             gyro=(data.get("AsX", 0.0), data.get("AsY", 0.0), data.get("AsZ", 0.0)),
+            mag=(data.get("HX", 0.0), data.get("HY", 0.0), data.get("HZ", 0.0)),
+            roll=roll, pitch=pitch, yaw=yaw,
+        )
+        self.status.tilt = sample.tilt_pct
+        self.monitor.add(stability.Sample(
+            t=started, roll=roll, pitch=pitch, yaw=yaw,
+            acc=sample.acc, gyro=sample.gyro,
         ))
 
         if started - self._last_temp_at >= TEMP_REFRESH_S:
@@ -508,7 +579,7 @@ class Recorder:
             self._last_temp_at = started
 
         if record:
-            self._append_sample(started, tilt)
+            self._append_sample(started, sample)
 
         # Pace to a steady rate; the sensor bandwidth is 10 Hz so 25 Hz keeps a
         # guard band above Nyquist.
@@ -518,22 +589,28 @@ class Recorder:
 
     # -- block assembly ---------------------------------------------------
 
-    def _append_sample(self, mono: float, tilt: float) -> None:
+    def _append_sample(self, mono: float, sample: af.Sample) -> None:
         elapsed_ms: float = (mono - self._record_start_mono) * 1000.0
-        self._pending.append((elapsed_ms, tilt))
+        self._pending.append((elapsed_ms, sample))
         if len(self._pending) >= af.SAMPLES_PER_BLOCK:
             self._flush_block()
 
     def _flush_block(self) -> None:
         # A block is 25 samples, not one second: it goes out when it is full,
-        # however long that took (section 5.2).
-        if not self._pending or self.writer is None:
+        # however long that took (section 5.2). Anything short is dropped.
+        if self.writer is None:
+            return
+        if len(self._pending) < af.SAMPLES_PER_BLOCK:
+            if self._pending:
+                logger.info("Discarding {} sample(s) that did not fill a block",
+                            len(self._pending))
+                self._pending.clear()
             return
         first_ms: float = self._pending[0][0]
         last_ms: float = self._pending[-1][0]
         block = af.Block(
             elapsed_ms=int(first_ms),
-            tilt=[t for _, t in self._pending],
+            samples=[sample for _, sample in self._pending],
             temp_c=self._temp,
             duration_ms=int(last_ms - first_ms),
             flags=self._block_flags,
@@ -558,13 +635,14 @@ class Recorder:
         self._record_start_epoch = self.time.now()
         self._record_start_mono = time.monotonic()
         name: str = af.build_filename(self._record_start_epoch, self.time.quality,
-                                      self.boot_count, partial=True)
+                                      self.position, self.boot_count, partial=True)
         path: str = os.path.join(self.data_dir, name)
         header = af.Header(
             start_epoch=self._record_start_epoch,
+            sensor_id=self.sensor_id,
+            position=self.position,
+            device_serial=self.sensor.serial,
             sample_rate_hz=SAMPLE_RATE_HZ,
-            modbus_addr=getattr(self.sensor.device, "ADDR", 0x50),
-            baud=self.sensor.baud or 115200,
         )
         try:
             self.writer = af.Writer(

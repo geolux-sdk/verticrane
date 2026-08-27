@@ -37,7 +37,14 @@
         {% if f.unit %}<span class="muted small">({{ f.unit }})</span>{% endif %}
       </td>
       <td>
-        {% if f.kind.__name__ == 'bool' %}
+        {% if f.choices %}
+          <select name="{{ f.key }}">
+            {% for value, label in f.choices %}
+              <option value="{{ value }}"
+                {% if cfg.get(f.key)|string == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        {% elif f.kind.__name__ == 'bool' %}
           <input type="checkbox" name="{{ f.key }}" {% if cfg.get(f.key) %}checked{% endif %}>
         {% else %}
           <input type="number" name="{{ f.key }}" value="{{ cfg.get(f.key) }}"
@@ -48,7 +55,7 @@
       </td>
       <td class="small muted">
         {{ f.note }}
-        {% if f.low is not none %}<br>허용 범위 {{ f.low }} ~ {{ f.high }}{% endif %}
+        {% if f.low is not none and not f.choices %}<br>허용 범위 {{ f.low }} ~ {{ f.high }}{% endif %}
       </td>
     </tr>
     {% endfor %}

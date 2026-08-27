@@ -32,14 +32,23 @@ def check(label: str, condition: bool, detail: str = "") -> None:
         print("  FAIL  {0}{1}".format(label, "  <- " + detail if detail else ""))
 
 
+def make_sample(n: int) -> af.Sample:
+    return af.Sample(
+        acc=(0.001 * n, 0.002 * n, 1.0),
+        gyro=(0.01 * n, 0.02 * n, 0.03 * n),
+        mag=(22.9 + n, 9.4 + n, -34.2 - n),
+        roll=0.100 + 0.001 * n, pitch=-0.050 - 0.001 * n, yaw=(40.0 + n) % 360.0,
+    )
+
+
 def make_blocks(count: int, start_ms: int = 0, rate_hz: int = 25) -> list[af.Block]:
     period_ms: int = 1000 // rate_hz
     span: int = period_ms * (af.SAMPLES_PER_BLOCK - 1)
     return [
         af.Block(
             elapsed_ms=start_ms + i * period_ms * af.SAMPLES_PER_BLOCK,
-            tilt=[0.100 + 0.001 * (i * af.SAMPLES_PER_BLOCK + j)
-                  for j in range(af.SAMPLES_PER_BLOCK)],
+            samples=[make_sample(i * af.SAMPLES_PER_BLOCK + j)
+                     for j in range(af.SAMPLES_PER_BLOCK)],
             temp_c=23.5 + 0.1 * i,
             duration_ms=span,
         )
@@ -50,20 +59,26 @@ def make_blocks(count: int, start_ms: int = 0, rate_hz: int = 25) -> list[af.Blo
 def test_sizes() -> None:
     print("\n[1] 구조체 크기")
     check("header = 64 bytes", struct.calcsize(af._HEADER_FMT) == 64)
-    check("block  = 128 bytes", struct.calcsize(af._BLOCK_FMT) == 128)
+    check("block  = 1232 bytes", struct.calcsize(af._BLOCK_FMT) == 1232)
     check("samples per block = 25", af.SAMPLES_PER_BLOCK == 25)
+    check("12 floats per sample", af.FLOATS_PER_SAMPLE == 12)
     per_sample: float = af.BLOCK_SIZE / af.SAMPLES_PER_BLOCK
-    check("5.1 bytes per sample", abs(per_sample - 5.12) < 0.01,
+    check("49.3 bytes per sample", abs(per_sample - 49.28) < 0.01,
           "{0:.2f}".format(per_sample))
 
 
 def test_header_roundtrip() -> None:
     print("\n[2] 헤더 왕복")
-    h = af.Header(start_epoch=1772179369.29, sample_rate_hz=25)
+    h = af.Header(start_epoch=1772179369.29, sample_rate_hz=25,
+                  sensor_id="pi-tilt001", position=af.POS_TOP,
+                  device_serial="WT4200068151")
     back = af.Header.unpack(h.pack())
     check("start epoch survives", abs(back.start_epoch - h.start_epoch) < 1e-6)
-    check("sensor model survives", back.sensor_model == "HWT9037-485")
-    check("baud survives", back.baud == 115200)
+    check("SENSOR_ID survives", back.sensor_id == "pi-tilt001", back.sensor_id)
+    check("position survives", back.position == af.POS_TOP)
+    check("position name", back.position_name == "TOP")
+    check("device serial survives", back.device_serial == "WT4200068151",
+          back.device_serial)
 
     corrupt = bytearray(h.pack())
     corrupt[20] ^= 0xFF
@@ -81,23 +96,46 @@ def test_block_roundtrip() -> None:
     check("block decodes", back is not None)
     assert back is not None
     check("25 samples", back.count == 25)
-    check("tilt preserved", abs(back.tilt[7] - b.tilt[7]) < 1e-6)
+    s0, o0 = back.samples[7], b.samples[7]
+    check("acceleration preserved", all(abs(a - c) < 1e-5 for a, c in zip(s0.acc, o0.acc)))
+    check("gyro preserved", all(abs(a - c) < 1e-5 for a, c in zip(s0.gyro, o0.gyro)))
+    check("magnetic field preserved", all(abs(a - c) < 1e-3 for a, c in zip(s0.mag, o0.mag)))
+    check("roll preserved", abs(s0.roll - o0.roll) < 1e-6)
+    check("pitch preserved", abs(s0.pitch - o0.pitch) < 1e-6)
+    check("yaw preserved", abs(s0.yaw - o0.yaw) < 1e-4)
     check("temperature preserved", abs(back.temp_c - b.temp_c) < 1e-4)
+    # tilt is not stored; it must follow exactly from the angles that are.
+    check("tilt derived from its own roll/pitch",
+          s0.tilt_pct == af.tilt_pct(s0.roll, s0.pitch))
+    # And it must still match the original, within float32 round-trip error.
+    check("tilt matches the original",
+          abs(s0.tilt_pct - af.tilt_pct(o0.roll, o0.pitch)) < 1e-4)
 
     corrupt = bytearray(b.pack())
-    corrupt[40] ^= 0xFF
+    corrupt[400] ^= 0xFF
     check("corrupt block returns None", af.Block.unpack(bytes(corrupt)) is None)
 
-    short = af.Block(elapsed_ms=0, tilt=[0.1, 0.2, 0.3], temp_c=20.0, duration_ms=80)
-    back2 = af.Block.unpack(short.pack())
-    assert back2 is not None
-    check("short block keeps its count", back2.count == 3)
+    # A block that never filled is dropped, not padded, so packing one is a bug.
+    short = af.Block(elapsed_ms=0, samples=[make_sample(i) for i in range(3)],
+                     temp_c=20.0, duration_ms=80)
+    try:
+        short.pack()
+        check("short block refuses to pack", False, "no exception")
+    except ValueError:
+        check("short block refuses to pack", True)
+
+    # And a file claiming a short block is treated as damaged, like a torn tail.
+    forged = bytearray(b.pack())
+    forged[0:2] = (3).to_bytes(2, "little")
+    import zlib as _z
+    forged[-4:] = (_z.crc32(bytes(forged[:-4])) & 0xFFFFFFFF).to_bytes(4, "little")
+    check("a block claiming < 25 is rejected", af.Block.unpack(bytes(forged)) is None)
 
 
 def test_write_and_scan(tmp: str) -> str:
     print("\n[4] 기록과 스캔")
-    header = af.Header(start_epoch=time.time())
-    path: str = os.path.join(tmp, "b0007_20260827_143012.unsynced.ahrsbin.partial")
+    header = af.Header(start_epoch=time.time(), position=af.POS_TOP)
+    path: str = os.path.join(tmp, "TOP_b0007_20260827_143012.unsynced.ahrsbin.partial")
     with af.Writer(path, header) as w:
         for block in make_blocks(10):
             w.write_block(block)
@@ -113,8 +151,8 @@ def test_write_and_scan(tmp: str) -> str:
 
 def test_truncate_and_recover(tmp: str) -> None:
     print("\n[5] 중간에 자르기 → 복구")
-    header = af.Header(start_epoch=time.time())
-    path: str = os.path.join(tmp, "b0008_20260827_150000.unsynced.ahrsbin.partial")
+    header = af.Header(start_epoch=time.time(), position=af.POS_TOP)
+    path: str = os.path.join(tmp, "TOP_b0008_20260827_150000.unsynced.ahrsbin.partial")
     with af.Writer(path, header) as w:
         for block in make_blocks(10):
             w.write_block(block)
@@ -141,8 +179,8 @@ def test_timeinfo_recovery(tmp: str) -> None:
     print("\n[6] .timeinfo 적용 → 이름 보정")
     device_start: float = time.mktime(time.strptime("20260827_143012", "%Y%m%d_%H%M%S"))
     corrected: float = device_start + 743.19
-    header = af.Header(start_epoch=device_start)
-    path: str = os.path.join(tmp, "b0009_20260827_143012.unsynced.ahrsbin.partial")
+    header = af.Header(start_epoch=device_start, position=af.POS_TOP)
+    path: str = os.path.join(tmp, "TOP_b0009_20260827_143012.unsynced.ahrsbin.partial")
     with af.Writer(path, header) as w:
         for block in make_blocks(5):
             w.write_block(block)
@@ -161,9 +199,10 @@ def test_timeinfo_recovery(tmp: str) -> None:
     assert final is not None
     name: str = os.path.basename(final)
     expected_stamp: str = time.strftime("%Y%m%d_%H%M%S", time.localtime(corrected))
-    check("name uses the corrected time", name.startswith(expected_stamp), name)
+    check("name uses the corrected time", name.startswith("TOP_" + expected_stamp), name)
     check(".unsynced dropped", ".unsynced" not in name, name)
-    check("boot prefix dropped", not name.startswith("b"), name)
+    check("boot prefix dropped", "_b0009_" not in name, name)
+    check("position kept", name.startswith("TOP_"), name)
     check("sidecar followed the rename", os.path.exists(af.timeinfo_path(final)))
 
     start, quality = af.effective_start(final)
@@ -174,29 +213,39 @@ def test_timeinfo_recovery(tmp: str) -> None:
 def test_filenames() -> None:
     print("\n[7] 파일명 규칙")
     epoch: float = time.mktime(time.strptime("20260827_143012", "%Y%m%d_%H%M%S"))
-    trusted: str = af.build_filename(epoch, af.QUALITY_SYNCED)
-    check("trusted name", trusted == "20260827_143012.ahrsbin", trusted)
-    untrusted: str = af.build_filename(epoch, af.QUALITY_UNSYNCED, boot_count=7)
-    check("untrusted name", untrusted == "b0007_20260827_143012.unsynced.ahrsbin", untrusted)
-    partial: str = af.build_filename(epoch, af.QUALITY_SYNCED, partial=True)
+    trusted: str = af.build_filename(epoch, af.QUALITY_SYNCED, af.POS_TOP)
+    check("trusted name", trusted == "TOP_20260827_143012.ahrsbin", trusted)
+    untrusted: str = af.build_filename(epoch, af.QUALITY_UNSYNCED, af.POS_BASE, 7)
+    check("untrusted name",
+          untrusted == "BASE_b0007_20260827_143012.unsynced.ahrsbin", untrusted)
+    unset: str = af.build_filename(epoch, af.QUALITY_SYNCED, af.POS_UNSET)
+    check("unset position is visible", unset.startswith("UNSET_"), unset)
+    partial: str = af.build_filename(epoch, af.QUALITY_SYNCED, af.POS_TOP, partial=True)
     check("partial name", partial.endswith(".ahrsbin.partial"), partial)
+
+    # Three devices recording at the same instant must not collide.
+    names = set(af.build_filename(epoch, af.QUALITY_SYNCED, p)
+                for p in (af.POS_BASE, af.POS_MIDDLE, af.POS_TOP))
+    check("three positions give three names", len(names) == 3, str(names))
 
     parsed = af.parse_filename(untrusted)
     check("parses back", parsed is not None)
     assert parsed is not None
     check("boot count recovered", parsed["boot_count"] == 7)
+    check("position recovered", parsed["position"] == af.POS_BASE)
     check("marked untrusted", not parsed["trusted"])
 
-    for bad in ("../etc/passwd", "20260827_143012.ahrsbin/../x", "note.txt",
-                "2026_143012.ahrsbin", "20260827_143012.ahrsbin.partial"):
+    for bad in ("../etc/passwd", "TOP_20260827_143012.ahrsbin/../x", "note.txt",
+                "TOP_2026_143012.ahrsbin", "TOP_20260827_143012.ahrsbin.partial",
+                "20260827_143012.ahrsbin", "SIDE_20260827_143012.ahrsbin"):
         check("rejects {0!r}".format(bad), af.parse_filename(bad) is None)
 
 
 def test_safe_join(tmp: str) -> None:
     print("\n[8] 경로 검증")
-    good: str = af.build_filename(time.time(), af.QUALITY_SYNCED)
+    good: str = af.build_filename(time.time(), af.QUALITY_SYNCED, af.POS_TOP)
     check("accepts a valid name", af.safe_join(tmp, good) is not None)
-    for bad in ("../../etc/passwd", "sub/20260827_143012.ahrsbin", "..\\x.ahrsbin"):
+    for bad in ("../../etc/passwd", "sub/TOP_20260827_143012.ahrsbin", "..\\x.ahrsbin"):
         check("blocks {0!r}".format(bad), af.safe_join(tmp, bad) is None)
 
 
@@ -208,9 +257,9 @@ def test_merge(tmp: str) -> None:
     # Two files that run back to back: 10 blocks = 10 s each.
     for i in range(2):
         start: float = base + i * 10.0
-        name: str = af.build_filename(start, af.QUALITY_SYNCED)
+        name: str = af.build_filename(start, af.QUALITY_SYNCED, af.POS_TOP)
         path: str = os.path.join(tmp, "merge_" + name)
-        with af.Writer(path, af.Header(start_epoch=start, sample_rate_hz=rate)) as w:
+        with af.Writer(path, af.Header(start_epoch=start, sample_rate_hz=rate, position=af.POS_TOP)) as w:
             for block in make_blocks(10):
                 w.write_block(block)
         paths.append(path)
