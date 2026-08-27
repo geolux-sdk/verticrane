@@ -47,6 +47,7 @@ RECORDER_DEFAULTS: dict[str, Any] = {
     "merge_gap_tolerance_seconds": 2.0,
     "stop_on_unstable": False,             # swaying is the thing we came to record
     "panel_refresh_seconds": 60,           # never lower this: see section 9
+    "panel_rotation": 90,                  # clockwise; the panel is mounted turned
     "delete_after_download": True,
     "trash_retention_days": 7,
     "min_free_mb": 500,

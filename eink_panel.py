@@ -188,7 +188,19 @@ STATE_SHORT: dict[str, str] = {
 }
 
 
-def render(status: dict[str, Any], contact_face: str = "bottom") -> Image.Image:
+# The panel sits rotated in the enclosure, so the finished frame is turned
+# before it goes out. Drawing stays in one upright coordinate system -- laying
+# the text out sideways instead would make every offset in here need a mental
+# rotation to check. Square panel, so nothing has to be re-fitted.
+ROTATIONS: dict[int, int] = {
+    90: Image.Transpose.ROTATE_270,     # PIL counts anticlockwise
+    180: Image.Transpose.ROTATE_180,
+    270: Image.Transpose.ROTATE_90,
+}
+
+
+def render(status: dict[str, Any], contact_face: str = "bottom",
+           rotate: int = 90) -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 255)
     d = ImageDraw.Draw(img)
 
@@ -237,7 +249,9 @@ def render(status: dict[str, Any], contact_face: str = "bottom") -> Image.Image:
         # Same signal the filename carries, made visible on site.
         d.rectangle([WIDTH - 62, TITLE_H + 90, WIDTH - 4, TITLE_H + 108], fill=0)
         _centre(d, TITLE_H + 92, "UNSET", _font(12, bold=True), 255, WIDTH - 62, WIDTH - 4)
-    return img
+
+    transpose = ROTATIONS.get(rotate % 360)
+    return img.transpose(transpose) if transpose else img
 
 
 def _temp(value: Optional[float]) -> str:
@@ -353,7 +367,9 @@ class PanelThread:
         if key == self._last_key:
             return
         self._last_key = key
-        show(render(status, contact_face=str(self.cfg.get("contact_face", "bottom"))))
+        show(render(status,
+                    contact_face=str(self.cfg.get("contact_face", "bottom")),
+                    rotate=int(self.cfg.get("panel_rotation", 90))))
 
 
 def main() -> int:
@@ -362,6 +378,8 @@ def main() -> int:
     parser.add_argument("--position", default="TOP", choices=["UNSET", "BASE", "MIDDLE", "TOP"])
     parser.add_argument("--contact-face", default="bottom",
                         choices=["bottom", "top", "left", "right"])
+    parser.add_argument("--rotate", type=int, default=90, choices=[0, 90, 180, 270],
+                        help="Clockwise rotation applied to the finished frame.")
     parser.add_argument("--scale", type=int, default=1, help="Enlarge the PNG for review.")
     args = parser.parse_args()
 
@@ -375,7 +393,7 @@ def main() -> int:
         "time_quality": af.QUALITY_SYNCED,
         "ip": local_ip(),
     }
-    img = render(demo, contact_face=args.contact_face)
+    img = render(demo, contact_face=args.contact_face, rotate=args.rotate)
 
     if args.out:
         if args.scale > 1:
