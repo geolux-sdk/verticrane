@@ -26,6 +26,11 @@ def create_app(recorder: Any, data_dir: str, cfg: dict[str, Any]) -> Flask:
     # Korean filenames and messages must survive JSON encoding intact.
     app.config["JSON_AS_ASCII"] = False
     app.json.ensure_ascii = False
+    # Templates are cached by default, so an updated page keeps serving the old
+    # HTML until the service restarts -- which looks exactly like a deploy that
+    # did not take. One stat() per render is nothing at this traffic.
+    app.jinja_env.auto_reload = True
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
     register(app)
     return app
 

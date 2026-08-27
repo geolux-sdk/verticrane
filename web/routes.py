@@ -51,6 +51,11 @@ def register(app: Flask) -> None:
     def _note_visitor() -> None:
         if request.path in _IGNORED_PATHS or request.path.startswith("/static/"):
             return
+        # The status page polls itself while recording. Those requests must not
+        # read as "the operator is here", or a browser left open in the vehicle
+        # would stop a measurement the moment the WiFi came back in range.
+        if request.args.get("auto"):
+            return
         rec: Any = _recorder()
         if rec is not None:
             rec.note_http_request()

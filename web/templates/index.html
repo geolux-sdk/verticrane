@@ -9,17 +9,16 @@
   {% if status %}
   <div class="grid">
     <div class="stat">
-      <b>{{ STATE_LABEL.get(status.state, status.state) }}</b>
-      <span>{% if status.state == "recording" %}{{ status.file }}{% else %}기록하지 않는 중{% endif %}</span>
+      <b id="v-state">{{ STATE_LABEL.get(status.state, status.state) }}</b>
+      <span id="v-file">{% if status.state == "recording" %}{{ status.file }}{% else %}기록하지 않는 중{% endif %}</span>
     </div>
     <div class="stat">
-      <b>{{ "%.4f"|format(status.tilt) if status.tilt is not none else "-" }}<span
-        style="font-size:13px"> %</span></b>
+      <b><span id="v-tilt">{{ "%.4f"|format(status.tilt) if status.tilt is not none else "-" }}</span><span style="font-size:13px"> %</span></b>
       <span>현재 기울기</span>
     </div>
     <div class="stat">
-      <b>{{ status.samples }}</b>
-      <span>샘플 · {{ "%.0f"|format(status.elapsed_s) }} 초</span>
+      <b id="v-samples">{{ status.samples }}</b>
+      <span>샘플 · <span id="v-elapsed">{{ "%.0f"|format(status.elapsed_s) }}</span> 초</span>
     </div>
     <div class="stat">
       <b>{{ "%.0f"|format(stats.free_mb) }}<span style="font-size:13px"> MB</span></b>
@@ -191,9 +190,29 @@ function save(blob, filename) {
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(href); }, 30000);
 }
 
-function armRefresh() {
+// Poll rather than reload the page. A reload tears down any download in
+// flight, and a plain request would read as "the operator is here" and stop the
+// recording -- hence ?auto=1, which the server ignores for that purpose.
+async function armRefresh() {
   if (!AUTO_REFRESH || refreshTimer) return;
-  refreshTimer = setTimeout(() => location.reload(), 5000);
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    try {
+      const r = await fetch('/api/status?auto=1');
+      const d = await r.json();
+      if (d.state !== RENDERED_STATE) { location.reload(); return; }
+      set('v-tilt', d.tilt_pct === null ? '-' : d.tilt_pct.toFixed(4));
+      set('v-samples', d.samples);
+      set('v-elapsed', Math.round(d.elapsed_s));
+      set('v-file', d.file || '기록하지 않는 중');
+    } catch (e) { /* the vehicle drove off; try again next tick */ }
+    armRefresh();
+  }, 5000);
+}
+
+function set(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
 }
 
 async function post(url) {
@@ -205,6 +224,7 @@ async function post(url) {
 // The page is a snapshot; refresh it while a recording is running so the
 // operator can watch the sample count climb without tapping anything.
 const AUTO_REFRESH = {% if status and status.state in ("recording", "waiting_stable") %}true{% else %}false{% endif %};
+const RENDERED_STATE = {{ (status.state if status else "")|tojson }};
 armRefresh();
 </script>
 {% endblock %}

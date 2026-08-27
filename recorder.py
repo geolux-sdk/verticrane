@@ -372,10 +372,20 @@ class Recorder:
     # -- external hooks ---------------------------------------------------
 
     def note_http_request(self) -> None:
-        """Called by the web layer on the first valid request (section 3)."""
+        """A valid request arrived. Someone is here to collect files (section 3).
+
+        While recording, that means the operator has come back and wants the
+        file that is still open -- so the recording is finalised for them. The
+        status page's own polling is exempt (it carries ?auto=1), or a browser
+        left open in the vehicle would end a measurement the moment the WiFi
+        came back into range.
+        """
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
+        if self.state == RECORDING:
+            logger.info("Operator connected while recording; finalising the file")
+            self._want_stop.set()
 
     @property
     def position(self) -> int:
@@ -432,9 +442,15 @@ class Recorder:
         return recovered
 
     def wait_for_http(self, seconds: float) -> bool:
-        """True when a request arrived inside the window (-> maintenance)."""
+        """True when a request arrived inside the window (-> maintenance).
+
+        The countdown starts once the network is up, not at boot. WiFi
+        association takes tens of seconds on this board, and a window that
+        expires before the operator can even reach the device is no window.
+        """
         if seconds <= 0:
             return False
+        self._wait_for_network(float(self.cfg.get("network_wait_seconds", 90)))
         logger.info("Waiting {:.0f}s for an HTTP request", seconds)
         # Keeps polling the sensor so the stability window is already warm if
         # nobody shows up.
@@ -444,6 +460,29 @@ class Recorder:
                 return True
             self._poll_once(record=False)
         return self._http_seen.is_set()
+
+    def _wait_for_network(self, limit: float) -> bool:
+        """Hold until this machine has a routable address, or give up.
+
+        Keeps polling the sensor meanwhile, so the stability window is already
+        warm whichever way the wait ends.
+        """
+        if limit <= 0:
+            return False
+        deadline: float = time.monotonic() + limit
+        announced: bool = False
+        while time.monotonic() < deadline and not self.stop_event.is_set():
+            if self._http_seen.is_set():
+                return True
+            if _local_ip() is not None:
+                logger.info("Network up after {:.0f}s", limit - (deadline - time.monotonic()))
+                return True
+            if not announced:
+                logger.info("Waiting up to {:.0f}s for the network", limit)
+                announced = True
+            self._poll_once(record=False)
+        logger.info("No network; going on without one")
+        return False
 
     # -- main loop --------------------------------------------------------
 
@@ -774,6 +813,18 @@ class Recorder:
         self.time.save_last_known()
         self.sensor.close()
         logger.info("Recorder stopped")
+
+
+def _local_ip() -> Optional[str]:
+    # No packet is sent; this just asks the kernel which source address a route
+    # to the outside would use. None means nothing is up yet.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.5)
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
 
 
 def _free_mb(path: str) -> float:
