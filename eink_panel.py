@@ -333,13 +333,28 @@ def wifi_ssid(configured: str = "") -> Optional[str]:
     if configured:
         return configured
     try:
+        # TIMESTAMP is when the profile was last used. Once a second network is
+        # saved, taking the first row would show whichever nmcli happened to list
+        # first -- which is not the one the operator should be looking for.
         out: str = subprocess.run(
-            ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+            ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
             capture_output=True, text=True, timeout=5).stdout
+        best: Optional[tuple[int, str]] = None
         for line in out.splitlines():
-            name, _, kind = line.rpartition(":")
-            if "wireless" in kind and name:
-                return name
+            parts = line.rsplit(":", 2)
+            if len(parts) != 3:
+                continue
+            name, kind, stamp = parts
+            if "wireless" not in kind or not name:
+                continue
+            try:
+                used = int(stamp)
+            except ValueError:
+                used = 0
+            if best is None or used > best[0]:
+                best = (used, name)
+        if best is not None:
+            return best[1]
     except (OSError, subprocess.SubprocessError):
         pass
     try:
