@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -35,7 +36,18 @@ HEIGHT: int = 200
 
 # Layout bands. Kept as constants because 200x200 leaves no room to guess.
 TITLE_H: int = 26
-FOOT_Y: int = 168
+FOOT_Y: int = 156
+
+# Which screen to draw. The panel shows one thing at a time because 200x200
+# cannot show three, and because what matters changes completely between
+# mounting the device, leaving it to record, and coming back for the files.
+SCREEN_INSTALL: str = "install"   # being fitted: which way up, which face down
+SCREEN_MEASURE: str = "measure"   # left alone: is it recording, and what does it read
+SCREEN_BRAND: str = "brand"       # operator is connected: nothing to decide here
+
+# How long a recording runs before the panel stops showing the mounting guide.
+# The operator may still be up the crane for the first minute.
+MEASURE_AFTER_S: float = 60.0
 
 # The Pi carries DejaVu; the Windows entries exist only so the layout can be
 # previewed off the device. Falling through to the bitmap default silently
@@ -133,7 +145,7 @@ def _centre(draw: ImageDraw.ImageDraw, y: int, text: str, font, fill: int,
 # --------------------------------------------------------------------------
 
 def draw_orientation(d: ImageDraw.ImageDraw, x: int, y: int,
-                     contact_face: str = "bottom") -> None:
+                     contact_face: str = "bottom", scale: float = 1.0) -> None:
     """One picture answering both "which way up" and "which face goes down".
 
     Drawn from the side. Z points up because that is what the sensor reports:
@@ -141,41 +153,48 @@ def draw_orientation(d: ImageDraw.ImageDraw, x: int, y: int,
     axis points up. The hatched edge is the face that meets the structure, and
     Z runs away from it.
     """
-    box_l, box_r = x + 14, x + 66
-    box_t, box_b = y + 30, y + 60
+    def u(v: float) -> int:
+        return int(round(v * scale))
+
+    box_l, box_r = x + u(14), x + u(66)
+    box_t, box_b = y + u(30), y + u(60)
 
     # Z arrow, rising out of the top face.
     zx: int = (box_l + box_r) // 2
-    d.line([zx, box_t - 2, zx, y + 6], fill=0, width=2)
-    d.polygon([(zx, y), (zx - 5, y + 9), (zx + 5, y + 9)], fill=0)
-    d.text((zx + 7, y + 1), "Z", font=_font(13, bold=True), fill=0)
+    d.line([zx, box_t - 2, zx, y + u(6)], fill=0, width=2)
+    d.polygon([(zx, y), (zx - u(5), y + u(9)), (zx + u(5), y + u(9))], fill=0)
+    d.text((zx + u(7), y + u(1)), "Z", font=_font(u(13), bold=True), fill=0)
 
     d.rectangle([box_l, box_t, box_r, box_b], outline=0, width=2)
 
     # Y comes out of the page towards the viewer; X runs to the right.
     cy: int = (box_t + box_b) // 2
-    d.ellipse([box_l + 8, cy - 6, box_l + 20, cy + 6], outline=0, width=1)
-    d.ellipse([box_l + 13, cy - 1, box_l + 15, cy + 1], fill=0)
-    d.text((box_l + 22, cy - 6), "Y", font=_font(10), fill=0)
+    d.ellipse([box_l + u(8), cy - u(6), box_l + u(20), cy + u(6)], outline=0, width=1)
+    d.ellipse([box_l + u(13), cy - 1, box_l + u(15), cy + 1], fill=0)
+    d.text((box_l + u(22), cy - u(6)), "Y", font=_font(u(10)), fill=0)
 
-    d.line([box_r - 24, cy, box_r - 8, cy], fill=0, width=2)
-    d.polygon([(box_r - 5, cy), (box_r - 11, cy - 4), (box_r - 11, cy + 4)], fill=0)
-    d.text((box_r - 22, cy - 16), "X", font=_font(10), fill=0)
+    d.line([box_r - u(24), cy, box_r - u(8), cy], fill=0, width=2)
+    d.polygon([(box_r - u(5), cy), (box_r - u(11), cy - u(4)),
+               (box_r - u(11), cy + u(4))], fill=0)
+    d.text((box_r - u(22), cy - u(16)), "X", font=_font(u(10)), fill=0)
 
     # The contact face: a hatched band on whichever edge meets the structure.
+    t: int = u(11)
     edges: dict[str, tuple[int, int, int, int]] = {
-        "bottom": (box_l, box_b + 3, box_r, box_b + 11),
-        "top":    (box_l, box_t - 11, box_r, box_t - 3),
-        "left":   (box_l - 11, box_t, box_l - 3, box_b),
-        "right":  (box_r + 3, box_t, box_r + 11, box_b),
+        "bottom": (box_l, box_b + u(3), box_r, box_b + t),
+        "top":    (box_l, box_t - t, box_r, box_t - u(3)),
+        "left":   (box_l - t, box_t, box_l - u(3), box_b),
+        "right":  (box_r + u(3), box_t, box_r + t, box_b),
     }
     ex0, ey0, ex1, ey1 = edges.get(contact_face, edges["bottom"])
     d.rectangle([ex0, ey0, ex1, ey1], outline=0, width=1)
-    for hx in range(ex0, ex1, 4):
-        d.line([hx, ey1, min(hx + 6, ex1), ey0], fill=0, width=1)
+    for hx in range(ex0, ex1, u(4) or 4):
+        d.line([hx, ey1, min(hx + u(6), ex1), ey0], fill=0, width=1)
 
     text, ko = _label(CONTACT_KO, CONTACT_EN)
-    _centre(d, ey1 + 3, text, _fit(d, text, 78, 11, korean=ko, floor=7), 0, x, x + 80)
+    width: int = u(80)
+    _centre(d, ey1 + 3, text, _fit(d, text, width - 2, u(11), korean=ko, floor=7),
+            0, x, x + width)
 
 
 # --------------------------------------------------------------------------
@@ -199,15 +218,38 @@ ROTATIONS: dict[int, int] = {
 }
 
 
+def pick_screen(status: dict[str, Any]) -> str:
+    """Which of the three screens this moment calls for."""
+    if status.get("state") == "maintenance":
+        return SCREEN_BRAND
+    if (status.get("state") == "recording"
+            and float(status.get("elapsed_s") or 0) >= MEASURE_AFTER_S):
+        return SCREEN_MEASURE
+    return SCREEN_INSTALL
+
+
 def render(status: dict[str, Any], contact_face: str = "bottom",
-           rotate: int = 90) -> Image.Image:
+           rotate: int = 90, ssid: Optional[str] = None) -> Image.Image:
     img = Image.new("1", (WIDTH, HEIGHT), 255)
     d = ImageDraw.Draw(img)
 
-    tilt: Optional[float] = status.get("tilt_pct")
-    position: str = status.get("position") or "UNSET"
+    _title(d, status)
+    screen: str = pick_screen(status)
+    if screen == SCREEN_BRAND:
+        _body_brand(d)
+    elif screen == SCREEN_MEASURE:
+        _body_measure(d, status)
+    else:
+        _body_install(d, contact_face)
+    _footer(d, status, ssid)
 
-    # --- title bar: who this device is -----------------------------------
+    transpose = ROTATIONS.get(rotate % 360)
+    return img.transpose(transpose) if transpose else img
+
+
+def _title(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    """Who this device is. On every screen -- three of them share one crane."""
+    position: str = status.get("position") or "UNSET"
     d.rectangle([0, 0, WIDTH - 1, TITLE_H - 1], fill=0)
     pos_font = _font(14, bold=True)
     pos_w: float = d.textlength(position, font=pos_font)
@@ -216,42 +258,60 @@ def render(status: dict[str, Any], contact_face: str = "bottom",
            font=_fit(d, sensor_id, WIDTH - 16 - int(pos_w), 14, bold=True), fill=255)
     _right(d, WIDTH - 5, 5, position, pos_font, 255)
 
-    # --- orientation diagram + the reading --------------------------------
-    draw_orientation(d, 2, TITLE_H + 2, contact_face)
 
-    if tilt is None:
-        d.text((92, TITLE_H + 20), "--", font=_font(34, bold=True), fill=0)
-    else:
-        d.text((92, TITLE_H + 14), "{0:.3f}".format(tilt), font=_font(30, bold=True), fill=0)
-        d.text((92, TITLE_H + 48), "%  tilt", font=_font(12), fill=0)
-    # No judgement here: whether a reading is acceptable is decided by the
-    # server that collects the files. This device records and hands over.
-    _centre(d, TITLE_H + 62, _temp(status.get("temp_c")),
-            _font(22, bold=True), 0, 90, WIDTH - 4)
+def _body_install(d: ImageDraw.ImageDraw, contact_face: str) -> None:
+    """Being fitted. Nothing to read yet -- only which way it goes on.
 
-    # --- state and running totals ------------------------------------------
-    d.line([4, FOOT_Y - 30, WIDTH - 5, FOOT_Y - 30], fill=0, width=1)
+    This is what the panel shows from the moment the power comes on, because
+    that is when the operator is carrying it up the crane to mount it.
+    """
+    draw_orientation(d, 22, TITLE_H + 4, contact_face, scale=1.45)
+
+
+def _body_measure(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    """Left alone and recording. The mounting guide has done its job."""
+    tilt: Optional[float] = status.get("tilt_pct")
+    _centre(d, TITLE_H + 8, "-" if tilt is None else "{0:.3f}".format(tilt),
+            _font(46, bold=True), 0)
+    _centre(d, TITLE_H + 58, "% tilt", _font(14), 0)
+    _centre(d, TITLE_H + 78, _temp(status.get("temp_c")), _font(30, bold=True), 0)
+
     line: str = "{0}  {1}   {2} smp".format(
         STATE_SHORT.get(str(status.get("state")), "?"),
         _hms(status.get("elapsed_s", 0)), status.get("samples", 0))
-    d.text((5, FOOT_Y - 25), line, font=_fit(d, line, WIDTH - 10, 15, bold=True), fill=0)
+    _centre(d, FOOT_Y - 20, line, _fit(d, line, WIDTH - 10, 14, bold=True), 0)
 
-    # --- how to reach it, and when this was drawn -------------------------
+
+def _body_brand(d: ImageDraw.ImageDraw) -> None:
+    """An operator is connected, so the panel has nothing left to tell them --
+    the browser says it better. It carries the name instead."""
+    _centre(d, TITLE_H + 34, "GEOLUX", _fit(d, "GEOLUX", WIDTH - 16, 44, bold=True), 0)
+    d.line([28, TITLE_H + 88, WIDTH - 29, TITLE_H + 88], fill=0, width=2)
+    _centre(d, TITLE_H + 96, "verticrane", _font(15), 0)
+
+
+def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any],
+            ssid: Optional[str]) -> None:
+    """How to reach it. No clock: an unsynced one would be worse than none.
+
+    The SSID is inverted while the device is actually on that network. Joined or
+    not is the first thing an operator wants to know when the page will not
+    load, and a solid bar answers it across a site without reading anything.
+    """
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
-    tiny = _font(12)
-    d.text((5, FOOT_Y + 6), status.get("ip") or "NO NETWORK", font=tiny, fill=0)
-    stamp: str = time.strftime("%H:%M:%S")
-    if status.get("time_quality") not in af.TRUSTED_QUALITIES:
-        stamp += " ?"      # the clock is not trusted; the file name says so too
-    _right(d, WIDTH - 5, FOOT_Y + 6, stamp, tiny, 0)
+    ip: Optional[str] = status.get("ip")
+    d.text((5, FOOT_Y + 4), ip or "NO NETWORK", font=_font(15, bold=bool(ip)), fill=0)
+    if not ssid:
+        return
 
-    if position == "UNSET":
-        # Same signal the filename carries, made visible on site.
-        d.rectangle([WIDTH - 62, TITLE_H + 90, WIDTH - 4, TITLE_H + 108], fill=0)
-        _centre(d, TITLE_H + 92, "UNSET", _font(12, bold=True), 255, WIDTH - 62, WIDTH - 4)
-
-    transpose = ROTATIONS.get(rotate % 360)
-    return img.transpose(transpose) if transpose else img
+    label: str = "wifi " + ssid
+    font = _fit(d, label, WIDTH - 16, 14)
+    y: int = FOOT_Y + 23
+    if ip:
+        d.rectangle([4, y - 2, WIDTH - 5, y + 17], fill=0)
+        d.text((8, y), label, font=font, fill=255)
+    else:
+        d.text((8, y), label, font=font, fill=0)
 
 
 def _temp(value: Optional[float]) -> str:
@@ -261,6 +321,35 @@ def _temp(value: Optional[float]) -> str:
 def _hms(seconds: float) -> str:
     s = int(seconds)
     return "{0:d}:{1:02d}:{2:02d}".format(s // 3600, (s // 60) % 60, s % 60)
+
+
+def wifi_ssid(configured: str = "") -> Optional[str]:
+    """The network to join, not the one currently joined.
+
+    Up the crane there is no connection, and that is exactly when the operator
+    needs to be told which SSID to look for. So this reports the *saved* profile
+    rather than the active one.
+    """
+    if configured:
+        return configured
+    try:
+        out: str = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+            capture_output=True, text=True, timeout=5).stdout
+        for line in out.splitlines():
+            name, _, kind = line.rpartition(":")
+            if "wireless" in kind and name:
+                return name
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        # The profile contents need root, but the filename is the SSID and the
+        # directory itself is readable.
+        for name in sorted(os.listdir("/etc/NetworkManager/system-connections")):
+            return name.rsplit(".nmconnection", 1)[0]
+    except OSError:
+        pass
+    return None
 
 
 def local_ip() -> Optional[str]:
@@ -361,7 +450,7 @@ class PanelThread:
         # Skip the refresh when nothing a reader would notice has changed: the
         # panel wears out by refresh count, so an idle device should not spend
         # them redrawing the same frame.
-        key = (status["state"], status["position"], status["ip"],
+        key = (pick_screen(status), status["state"], status["position"], status["ip"],
                round(status["tilt_pct"], 3) if status["tilt_pct"] is not None else None,
                status["samples"] // 250)
         if key == self._last_key:
@@ -369,13 +458,16 @@ class PanelThread:
         self._last_key = key
         show(render(status,
                     contact_face=str(self.cfg.get("contact_face", "bottom")),
-                    rotate=int(self.cfg.get("panel_rotation", 90))))
+                    rotate=int(self.cfg.get("panel_rotation", 90)),
+                    ssid=wifi_ssid(str(self.cfg.get("wifi_ssid", "")))))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render the e-paper status panel.")
     parser.add_argument("--out", help="Write a PNG instead of driving the panel.")
     parser.add_argument("--position", default="TOP", choices=["UNSET", "BASE", "MIDDLE", "TOP"])
+    parser.add_argument("--screen", choices=[SCREEN_INSTALL, SCREEN_MEASURE, SCREEN_BRAND],
+                        help="Force a screen instead of picking one from the state.")
     parser.add_argument("--contact-face", default="bottom",
                         choices=["bottom", "top", "left", "right"])
     parser.add_argument("--rotate", type=int, default=90, choices=[0, 90, 180, 270],
@@ -393,7 +485,12 @@ def main() -> int:
         "time_quality": af.QUALITY_SYNCED,
         "ip": local_ip(),
     }
-    img = render(demo, contact_face=args.contact_face, rotate=args.rotate)
+    if args.screen == SCREEN_BRAND:
+        demo["state"] = "maintenance"
+    elif args.screen == SCREEN_INSTALL:
+        demo["state"] = "waiting_stable"
+    img = render(demo, contact_face=args.contact_face, rotate=args.rotate,
+                 ssid=wifi_ssid())
 
     if args.out:
         if args.scale > 1:
