@@ -756,6 +756,10 @@ class Recorder:
         except (OSError, af.FormatError, ValueError) as exc:
             logger.error("Could not finalise {}: {}", os.path.basename(path), exc)
 
+        # The recording is over; stop reporting its name as the current file.
+        # Leaving it set made /api/status look like a recording was still open.
+        self.status.file = None
+
         if discard and final is not None:
             # Finalised first so what lands in the trash is a valid, readable
             # file -- recoverable by hand if this turns out to have been wrong.
