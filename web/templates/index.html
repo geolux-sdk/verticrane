@@ -103,7 +103,7 @@
           {% if not f.trusted_time %} 시각 미확인{% endif %}
         </td>
         <td class="num">
-          <a class="btn" href="/api/files/{{ f.name }}">받기</a>
+          <button class="btn" onclick="collect(this, '/api/files/{{ f.name }}', '{{ f.name }}')">받기</button>
         </td>
       </tr>
       {% endfor %}
@@ -113,20 +113,47 @@
       <p class="small muted" style="margin:12px 0 0">
         시간이 이어지는 파일은 하나로 합쳐 받을 수 있습니다:
         {% for g in files|map(attribute='group')|unique|sort %}
-          <a href="/api/groups/{{ g }}">그룹 {{ g }}</a>{% if not loop.last %} · {% endif %}
+          <button class="btn" onclick="collect(this, '/api/groups/{{ g }}', '')">그룹 {{ g }}</button>
         {% endfor %}
       </p>
     {% endif %}
 
     <p class="small muted" style="margin:12px 0 0">
-      받은 파일은 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
-      전송이 중간에 끊기면 파일은 그대로 있습니다.
+      파일을 끝까지 받으면 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
+      전송이 중간에 끊기면 그대로 남으니 다시 받으면 됩니다.
       {% if stats.trashed %} 현재 휴지통 {{ stats.trashed }}개.{% endif %}
     </p>
   {% endif %}
 </div>
 
 <script>
+// The browser confirms it has the file; the server cannot tell on its own.
+// A finished response only means the bytes reached the socket, and a small
+// file leaves in one write long before it is delivered. So the whole body is
+// read here first, saved, and only then is the file retired on the device.
+async function collect(btn, url, name) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '받는 중…';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const filename = (r.headers.get('content-disposition') || '')
+      .match(/filename="?([^"]+)"?/)?.[1] || name || 'recording.ahrsbin';
+    const blob = await r.blob();          // throws if the connection drops
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    await fetch(url + '/collected', {method: 'POST'});
+    location.reload();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = label;
+    alert('전송이 끊겼습니다. 파일은 그대로 있으니 다시 받으세요.
+' + e.message);
+  }
+}
+
 async function post(url) {
   const r = await fetch(url, {method: 'POST'});
   const j = await r.json().catch(() => ({}));

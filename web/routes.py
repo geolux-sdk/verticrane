@@ -160,7 +160,7 @@ def register(app: Flask) -> None:
         path: Optional[str] = af.safe_join(_data_dir(), filename)
         if path is None or not os.path.exists(path):
             return jsonify({"error": "not found"}), 404
-        return _send([path], os.path.basename(path), [os.path.basename(path)])
+        return _send([path], os.path.basename(path))
 
     @app.get("/api/groups/<int:group>")
     def api_download_group(group: int) -> Response:
@@ -168,7 +168,7 @@ def register(app: Flask) -> None:
         if not members:
             return jsonify({"error": "not found"}), 404
         if len(members) == 1:
-            return _send([members[0].path], members[0].name, [members[0].name])
+            return _send([members[0].path], members[0].name)
 
         # Merged into one valid .ahrsbin so the operator gets a single file for
         # a single measurement, named after its corrected start (section 5.4).
@@ -180,8 +180,35 @@ def register(app: Flask) -> None:
             os.unlink(merged)
             logger.error("Merge of group {} failed: {}", group, exc)
             return jsonify({"error": str(exc)}), 500
-        return _send([merged], members[0].name, [m.name for m in members],
-                     cleanup=merged)
+        return _send([merged], members[0].name, cleanup=merged)
+
+    @app.post("/api/files/<path:filename>/collected")
+    def api_collected(filename: str) -> Response:
+        """The operator's browser confirming it has the file on disk.
+
+        This, not the end of the transfer, is what retires a recording. It is
+        sent only after the whole body has been read and handed to the browser
+        to save, so a connection that dropped part way through never gets here
+        and the file stays in the list (section 7).
+        """
+        if not bool(_cfg().get("delete_after_download", True)):
+            return jsonify({"retired": [], "reason": "disabled"})
+        path: Optional[str] = af.safe_join(_data_dir(), filename)
+        if path is None or not os.path.exists(path):
+            return jsonify({"error": "not found"}), 404
+        return jsonify({"retired": filestore.move_to_trash(
+            _data_dir(), [os.path.basename(path)])})
+
+    @app.post("/api/groups/<int:group>/collected")
+    def api_group_collected(group: int) -> Response:
+        if not bool(_cfg().get("delete_after_download", True)):
+            return jsonify({"retired": [], "reason": "disabled"})
+        members = filestore.group_members(_data_dir(), group, _gap())
+        if not members:
+            return jsonify({"error": "not found"}), 404
+        # The operator received the merged whole, so the whole group retires.
+        return jsonify({"retired": filestore.move_to_trash(
+            _data_dir(), [m.name for m in members])})
 
     @app.delete("/api/files/<path:filename>")
     def api_delete(filename: str) -> Response:
@@ -216,16 +243,15 @@ def register(app: Flask) -> None:
 # Download helper
 # --------------------------------------------------------------------------
 
-def _send(paths: list[str], display_name: str, retire: list[str],
+def _send(paths: list[str], display_name: str,
           cleanup: Optional[str] = None) -> Response:
-    """Stream a file, and retire the originals only once it is fully delivered.
+    """Stream a recording out. Never retires it -- see api_collected.
 
-    The transfer is the fragile part: the vehicle's WiFi drops as it moves off,
-    so a download cut half way through is an ordinary event. The trash move sits
-    after the loop, which a client disconnect never reaches.
+    A finished generator only means the bytes reached the socket, not the
+    operator. A file smaller than one chunk leaves here in a single write and
+    the loop ends long before anything is delivered, so "the download finished"
+    is not something this side can observe. The client says so instead.
     """
-    data_dir: str = _data_dir()
-    retire_after: bool = bool(_cfg().get("delete_after_download", True))
     total: int = sum(os.path.getsize(p) for p in paths)
 
     def generate() -> Iterator[bytes]:
@@ -237,16 +263,9 @@ def _send(paths: list[str], display_name: str, retire: list[str],
                         if not chunk:
                             break
                         yield chunk
-        except GeneratorExit:
-            logger.warning("Download of {} was interrupted; keeping the file",
-                           display_name)
-            raise
         finally:
             if cleanup and os.path.exists(cleanup):
                 os.unlink(cleanup)
-        # Only reached when every byte went out.
-        if retire_after:
-            filestore.move_to_trash(data_dir, retire)
 
     response = Response(stream_with_context(generate()),
                         mimetype="application/octet-stream")
