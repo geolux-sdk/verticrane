@@ -144,12 +144,20 @@
 </div>
 
 <script>
+// While recording, the page refreshes itself so the sample count climbs without
+// the operator tapping anything. That refresh has to stand down during a
+// download: reloading mid-transfer tears down the fetch, and a file of any size
+// takes longer than the interval. The timer is armed at the bottom of this
+// script and cleared here.
+let refreshTimer = null;
+
 // The browser confirms it has the file; the server cannot tell on its own.
 // A finished response only means the bytes reached the socket, and a small
 // file leaves in one write long before it is delivered. So the whole body is
 // read here first, saved, and only then is the file retired on the device.
 async function collect(btn, url, name) {
   const label = btn.textContent;
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
   btn.disabled = true; btn.textContent = '받는 중…';
   try {
     const r = await fetch(url);
@@ -157,18 +165,35 @@ async function collect(btn, url, name) {
     const filename = (r.headers.get('content-disposition') || '')
       .match(/filename="?([^"]+)"?/)?.[1] || name || 'recording.ahrsbin';
     const blob = await r.blob();          // throws if the connection drops
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    save(blob, filename);
     await fetch(url + '/collected', {method: 'POST'});
     location.reload();
   } catch (e) {
     btn.disabled = false; btn.textContent = label;
     alert('전송이 끊겼습니다. 파일은 그대로 있으니 다시 받으세요.
 ' + e.message);
+    armRefresh();
   }
+}
+
+// Two well-known traps here, both of which silently produce no download:
+//  - the anchor has to be in the document before click() for some browsers;
+//  - revoking the object URL immediately after click() can pull the blob out
+//    from under a download that has not started reading it yet.
+function save(blob, filename) {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(href); }, 30000);
+}
+
+function armRefresh() {
+  if (!AUTO_REFRESH || refreshTimer) return;
+  refreshTimer = setTimeout(() => location.reload(), 5000);
 }
 
 async function post(url) {
@@ -179,8 +204,7 @@ async function post(url) {
 }
 // The page is a snapshot; refresh it while a recording is running so the
 // operator can watch the sample count climb without tapping anything.
-{% if status and status.state in ("recording", "waiting_stable") %}
-setTimeout(() => location.reload(), 5000);
-{% endif %}
+const AUTO_REFRESH = {% if status and status.state in ("recording", "waiting_stable") %}true{% else %}false{% endif %};
+armRefresh();
 </script>
 {% endblock %}
