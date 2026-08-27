@@ -1,0 +1,44 @@
+# systemd unit for the AUTO_RUN tilt recorder (Raspberry Pi).
+#
+# This is the service the field device runs. It owns the serial port, so the
+# developer tools in dev/ cannot run while it is up -- stop it first:
+#
+#   sudo systemctl stop verticrane-recorder
+#
+# Install:
+#   sudo cp ~/verticrane/verticrane-recorder.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now verticrane-recorder
+#
+# The Streamlit dashboard must NOT be enabled alongside this: both would open
+# the same serial port, and on a Zero 2 W the dashboard eats CPU it needs.
+#   sudo systemctl disable --now verticrane-dashboard
+
+[Unit]
+Description=Verticrane AUTO_RUN tilt recorder
+After=network.target
+Wants=network-online.target
+# Never give up restarting. The default start limit would stop trying after a
+# few rapid crashes, which on an unattended device means silently no data.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/verticrane
+# Uncomment to pin the serial port instead of auto-detection (the on-board UART
+# on GPIO14/15 is found automatically; a USB dongle needs naming here):
+# Environment=VERTICRANE_PORT=/dev/serial0
+ExecStart=/home/pi/verticrane/.venv/bin/python recorder.py
+
+# SIGTERM lets the recorder finish the block it is assembling and finalise the
+# file. Without the grace period systemd would SIGKILL it and the last second
+# would go through boot recovery instead -- correct, but needlessly lossy.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
