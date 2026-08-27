@@ -235,9 +235,43 @@ def test_filenames() -> None:
     check("position recovered", parsed["position"] == af.POS_BASE)
     check("marked untrusted", not parsed["trusted"])
 
+    # A recording that began on an untrusted clock and then lost its tail to a
+    # power cut carries both marks. This is the ordinary field case -- power up
+    # away from WiFi, power down without warning -- and once it failed to parse
+    # the file was on the card but absent from the operator's list.
+    both: str = af.build_filename(epoch, af.QUALITY_UNSYNCED, af.POS_TOP, 34,
+                                  recovered=True)
+    parsed = af.parse_filename(both)
+    check("recovered+unsynced parses", parsed is not None, both)
+    assert parsed is not None
+    check("both: untrusted", not parsed["trusted"], both)
+    check("both: recovered", parsed["recovered"], both)
+    check("both: boot count kept", parsed["boot_count"] == 34, both)
+    check("both: position kept", parsed["position"] == af.POS_TOP, both)
+    check("both: start time kept", abs(parsed["start_epoch"] - epoch) < 1.0, both)
+
+    # Either order reads the same, so reordering the two marks cannot silently
+    # hide a file again.
+    swapped: str = "TOP_b0034_20260827_143012.unsynced.recovered.ahrsbin"
+    other = af.parse_filename(swapped)
+    check("mark order does not matter", other is not None, swapped)
+    assert other is not None
+    check("swapped: untrusted", not other["trusted"], swapped)
+    check("swapped: recovered", other["recovered"], swapped)
+
+    # _unique_path's collision counter, which lands on exactly these names:
+    # an untrusted clock plus a boot counter that did not advance.
+    duped: str = "TOP_b0034_20260827_143012.recovered.unsynced_2.ahrsbin"
+    dparsed = af.parse_filename(duped)
+    check("collision counter parses", dparsed is not None, duped)
+    assert dparsed is not None
+    check("duped: recovered", dparsed["recovered"], duped)
+
     for bad in ("../etc/passwd", "TOP_20260827_143012.ahrsbin/../x", "note.txt",
                 "TOP_2026_143012.ahrsbin", "TOP_20260827_143012.ahrsbin.partial",
-                "20260827_143012.ahrsbin", "SIDE_20260827_143012.ahrsbin"):
+                "20260827_143012.ahrsbin", "SIDE_20260827_143012.ahrsbin",
+                "TOP_20260827_143012.recovered.recovered.ahrsbin",
+                "TOP_20260827_143012.pending.ahrsbin"):
         check("rejects {0!r}".format(bad), af.parse_filename(bad) is None)
 
 

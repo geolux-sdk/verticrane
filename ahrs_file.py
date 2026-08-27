@@ -79,14 +79,20 @@ EXT: str = ".ahrsbin"
 PARTIAL_SUFFIX: str = ".partial"
 TIMEINFO_SUFFIX: str = ".timeinfo"
 
-# FLAG_[bNNNN_]YYYYMMDD_HHMMSS[.unsynced][.recovered].ahrsbin -- checked before
-# any path is opened, so a request can never walk out of the data directory.
+# FLAG_[bNNNN_]YYYYMMDD_HHMMSS[.recovered][.unsynced][_N].ahrsbin -- checked
+# before any path is opened, so a request can never walk out of the data
+# directory.
 FILENAME_RE: re.Pattern[str] = re.compile(
     r"^(?P<flag>UNSET|BASE|MIDDLE|TOP)_"
     r"(?:b(?P<boot>\d{4,})_)?"
     r"(?P<stamp>\d{8}_\d{6})"
-    r"(?P<unsynced>\.unsynced)?"
-    r"(?P<recovered>\.recovered)?"
+    # The marks are read as a set, not a sequence. A file can carry both -- a
+    # recording that started on an untrusted clock and then lost its tail to a
+    # power cut -- and fixing their order here once made exactly those files
+    # unparseable, so they vanished from the operator's list and could not even
+    # be downloaded by name.
+    r"(?P<marks>(?:\.recovered|\.unsynced)*)"
+    r"(?:_(?P<dup>\d+))?"           # the collision counter _unique_path appends
     r"\.ahrsbin$"
 )
 _STAMP_FMT: str = "%Y%m%d_%H%M%S"
@@ -299,13 +305,16 @@ def parse_filename(name: str) -> Optional[dict]:
         start_epoch: float = time.mktime(time.strptime(m.group("stamp"), _STAMP_FMT))
     except ValueError:
         return None
+    marks: list[str] = [part for part in m.group("marks").split(".") if part]
+    if len(set(marks)) != len(marks):
+        return None                      # ".recovered.recovered" is not a name we write
     return {
         "start_epoch": start_epoch,
         "position": POSITION_VALUES.get(m.group("flag").lower(), POS_UNSET),
         "position_name": m.group("flag"),
         "boot_count": int(m.group("boot")) if m.group("boot") else 0,
-        "trusted": m.group("unsynced") is None,
-        "recovered": m.group("recovered") is not None,
+        "trusted": QUALITY_UNSYNCED not in marks,
+        "recovered": "recovered" in marks,
     }
 
 
