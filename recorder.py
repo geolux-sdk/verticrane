@@ -362,6 +362,8 @@ class Recorder:
         self._next_ntp_check: float = 0.0
         self._since_judged: int = 0
         self._next_purge: float = 0.0
+        self._next_ip_check: float = 0.0
+        self._panel_ip: Optional[str] = None
         self.panel: Optional[Any] = None
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
@@ -495,6 +497,24 @@ class Recorder:
             self._poll_once(record=False)
         return self._http_seen.is_set()
 
+    def _note_address(self) -> None:
+        """Wake the panel when the address it prints changes.
+
+        The panel is drawn on events, so a network that comes back while the
+        device sits idle has to be pushed at it -- with nothing polling, the
+        footer would otherwise keep saying NO NETWORK until something else
+        happened to change the frame.
+
+        Watching the address rather than the link is deliberate: the footer
+        prints an address, so associating with an AP is not yet news.
+        """
+        ip: Optional[str] = _local_ip()
+        if ip == self._panel_ip:
+            return
+        self._panel_ip = ip
+        if self.panel is not None:
+            self.panel.refresh_now()
+
     def _await_address(self, limit: float) -> None:
         """Once associated, give DHCP time to hand out an address."""
         deadline: float = time.monotonic() + limit
@@ -615,6 +635,12 @@ class Recorder:
 
     def _poll_once(self, record: bool) -> None:
         started: float = time.monotonic()
+        # Here rather than in _tick: the boot holds spin on _poll_once and skip
+        # _tick entirely, and that is precisely when the address first lands.
+        if started >= self._next_ip_check:
+            self._next_ip_check = started + float(
+                self.cfg.get("ip_check_interval_seconds", 10))
+            self._note_address()
         if not self.sensor.connect():
             time.sleep(0.2)
             return

@@ -19,6 +19,7 @@ fi
 # The runtime suites need no hardware and must always pass.
 "${PYTHON_CMD}" test_ahrs_file.py || exit 1
 "${PYTHON_CMD}" test_stability.py || exit 1
+"${PYTHON_CMD}" test_eink_panel.py || exit 1
 
 # The dashboard self-check talks to the sensor, so it comes last.
 exec "${PYTHON_CMD}" dev/test.py "$@"

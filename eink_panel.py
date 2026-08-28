@@ -11,9 +11,14 @@
 # It shows readings but never judges them. Whether a tilt is acceptable is for
 # the server that collects the recordings to decide; this device records.
 #
-# That is also why it refreshes once a minute and no faster. A full refresh takes
-# about 1.4 s and the panel is rated in refresh count -- at 1 Hz it would be worn
-# out in roughly two weeks. Live numbers belong in the browser, not here.
+# A full refresh takes about 1.4 s and the panel is rated in refresh count, so
+# it is driven by events, not by a clock: something happens, the frame is drawn
+# once, and the thread goes back to sleep indefinitely. A device left alone in a
+# state nobody is watching spends no refreshes at all.
+#
+# The measurement screen is the one exception. It carries a live number, and a
+# number that silently stops tracking the crane is worse than no number, so that
+# screen -- and only that screen -- also refreshes on a timer.
 
 from __future__ import annotations
 
@@ -26,7 +31,7 @@ import time
 from typing import Any, Optional
 
 from loguru import logger
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 import ahrs_file as af
 
@@ -40,13 +45,30 @@ FOOT_Y: int = 156
 # Which screen to draw. The panel shows one thing at a time because 200x200
 # cannot show three, and because what matters changes completely between
 # mounting the device, leaving it to record, and coming back for the files.
+SCREEN_BOOT: str = "boot"         # just came up: the brand frame, inverted
 SCREEN_INSTALL: str = "install"   # being fitted: which way up, which face down
-SCREEN_MEASURE: str = "measure"   # left alone: is it recording, and what does it read
+SCREEN_RECORDING: str = "record"  # recording has begun; no reading to show yet
+SCREEN_MEASURE: str = "measure"   # left alone: what it reads
 SCREEN_BRAND: str = "brand"       # operator is connected: nothing to decide here
 
-# How long a recording runs before the panel stops showing the mounting guide.
-# The operator may still be up the crane for the first minute.
-MEASURE_AFTER_S: float = 60.0
+# The boot frame is the brand frame inverted, and that is the whole point. The
+# panel keeps its image without power, so whatever was on it before the power
+# cut is still there when the power returns -- an unchanged frame cannot say
+# "this device is running". A photo negative of the previous frame can.
+#
+# It says the recorder started, which is not the same as the power arriving:
+# kernel and userspace take about 24 s on a Pi Zero 2 W, and the first SPI
+# refresh a further 2 s. Nothing drawn from Python can close that gap.
+BOOT_SPLASH_S: float = 10.0
+
+# How long the RECORDING frame stands before the reading replaces it. Long
+# enough for someone beside the device to see that it started, short enough
+# that they are not left waiting for a number.
+#
+# It used to be 60 s, to hold the mounting guide up while the operator was
+# still on the crane. The mount delay already covers the climb, and the
+# RECORDING frame now says what the guide could not.
+MEASURE_AFTER_S: float = 15.0
 
 # The Pi carries DejaVu; the Windows entries exist only so the layout can be
 # previewed off the device. Falling through to the bitmap default silently
@@ -218,12 +240,20 @@ ROTATIONS: dict[int, int] = {
 
 
 def pick_screen(status: dict[str, Any]) -> str:
-    """Which of the three screens this moment calls for."""
-    if status.get("state") == "maintenance":
+    """Which screen this moment calls for.
+
+    The order matters: booting outranks everything because for those first
+    seconds the only question anyone has is whether the device came up.
+    """
+    if status.get("booting"):
+        return SCREEN_BOOT
+    state: Any = status.get("state")
+    if state == "maintenance":
         return SCREEN_BRAND
-    if (status.get("state") == "recording"
-            and float(status.get("elapsed_s") or 0) >= MEASURE_AFTER_S):
-        return SCREEN_MEASURE
+    if state == "recording":
+        if float(status.get("elapsed_s") or 0) >= MEASURE_AFTER_S:
+            return SCREEN_MEASURE
+        return SCREEN_RECORDING
     return SCREEN_INSTALL
 
 
@@ -234,13 +264,20 @@ def render(status: dict[str, Any], contact_face: str = "bottom",
 
     _title(d, status)
     screen: str = pick_screen(status)
-    if screen == SCREEN_BRAND:
+    if screen in (SCREEN_BRAND, SCREEN_BOOT):
         _body_brand(d)
+    elif screen == SCREEN_RECORDING:
+        _body_recording(d, status)
     elif screen == SCREEN_MEASURE:
         _body_measure(d, status)
     else:
         _body_install(d, contact_face)
     _footer(d, status)
+
+    if screen == SCREEN_BOOT:
+        # Inverted whole, title bar included, so it cannot be mistaken for any
+        # frame the device draws while it is running.
+        img = ImageChops.invert(img)
 
     transpose = ROTATIONS.get(rotate % 360)
     return img.transpose(transpose) if transpose else img
@@ -265,6 +302,20 @@ def _body_install(d: ImageDraw.ImageDraw, contact_face: str) -> None:
     that is when the operator is carrying it up the crane to mount it.
     """
     draw_orientation(d, 22, TITLE_H + 4, contact_face, scale=1.45)
+
+
+def _body_recording(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    """Recording has started, and that is the entire message.
+
+    Reading this from the ground is the point, so it is one word at the size
+    the panel can manage. The elapsed time underneath is what separates a live
+    frame from one left behind by a power cut.
+    """
+    label, korean = _label("기록 중", "RECORDING")
+    d.rectangle([0, TITLE_H + 6, WIDTH - 1, TITLE_H + 58], fill=0)
+    _centre(d, TITLE_H + 11, label,
+            _fit(d, label, WIDTH - 16, 38, bold=True, korean=korean), 255)
+    _centre(d, TITLE_H + 74, _hms(status.get("elapsed_s", 0)), _font(34, bold=True), 0)
 
 
 def _body_measure(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
@@ -360,11 +411,21 @@ def show(img: Image.Image) -> bool:
 
 
 class PanelThread:
-    """Refreshes the panel on its own thread (section 9).
+    """Draws the panel when something happens, not on a clock (section 9).
 
     A refresh blocks on SPI for about 1.4 s. On the polling loop that would
     drop 35 samples every minute, so it runs here and only ever reads a
     snapshot the recorder has already prepared.
+
+    The thread sleeps on an event with no timeout. Whoever changes something
+    the panel shows calls refresh_now(); a device sitting untouched in a state
+    nobody is watching spends no refreshes at all. Two things are genuinely
+    time-based rather than event-based, and both are one-shot deadlines rather
+    than a repeating tick: the end of the boot frame, and the moment the
+    RECORDING frame gives way to the reading.
+
+    The measurement screen is the exception that does repeat. Its number tracks
+    the crane, and a number frozen an hour ago is worse than none.
     """
 
     def __init__(self, recorder: Any, cfg: dict[str, Any]) -> None:
@@ -374,13 +435,19 @@ class PanelThread:
         self._stop = threading.Event()
         self._last_key: Optional[tuple] = None
         self._thread: Optional[threading.Thread] = None
+        self._started: float = time.monotonic()
 
     def start(self) -> None:
+        self._started = time.monotonic()
         self._thread = threading.Thread(target=self._run, name="panel", daemon=True)
         self._thread.start()
 
     def refresh_now(self) -> None:
-        """Called on a state change: those must not wait out the interval."""
+        """Something the panel shows has changed. Draw it now.
+
+        Cheap to call and safe to over-call: the frame is only pushed to the
+        panel when the drawn content actually differs.
+        """
         self._wake.set()
 
     def stop(self) -> None:
@@ -389,18 +456,41 @@ class PanelThread:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            status: Optional[dict[str, Any]] = None
             try:
-                self._draw()
+                status = self._draw()
             except Exception as exc:                      # noqa: BLE001
                 # A missing or broken panel must never stop the recording.
                 logger.error("Panel update failed: {}", exc)
-            interval: float = float(self.cfg.get("panel_refresh_seconds", 60))
-            self._wake.wait(max(interval, 10.0))
+            if self._stop.is_set():
+                break
+            self._wake.wait(self._next_wait(status))
             self._wake.clear()
 
-    def _draw(self) -> None:
+    def _next_wait(self, status: Optional[dict[str, Any]]) -> Optional[float]:
+        """Seconds until the next frame is due, or None to wait for an event.
+
+        None is the normal answer. Event.wait(None) blocks until refresh_now()
+        is called, which is what makes an idle device cost nothing.
+        """
+        splash_left: float = (self._started + BOOT_SPLASH_S) - time.monotonic()
+        if splash_left > 0:
+            return splash_left
+        if status is None:
+            return None
+        screen: str = pick_screen(status)
+        if screen == SCREEN_RECORDING:
+            # The one-shot handover to the reading.
+            left: float = MEASURE_AFTER_S - float(status.get("elapsed_s") or 0)
+            if left > 0:
+                return left
+        if screen == SCREEN_MEASURE:
+            return max(float(self.cfg.get("panel_refresh_seconds", 60)), 10.0)
+        return None
+
+    def _status(self) -> dict[str, Any]:
         snap = self.recorder.snapshot()
-        status: dict[str, Any] = {
+        return {
             "sensor_id": snap.sensor_id,
             "position": snap.position,
             "state": snap.state,
@@ -410,26 +500,33 @@ class PanelThread:
             "elapsed_s": snap.elapsed_s,
             "time_quality": snap.time_quality,
             "ip": local_ip(),
+            "booting": (time.monotonic() - self._started) < BOOT_SPLASH_S,
         }
-        # Skip the refresh when nothing a reader would notice has changed: the
-        # panel wears out by refresh count, so an idle device should not spend
-        # them redrawing the same frame.
+
+    def _draw(self) -> dict[str, Any]:
+        status: dict[str, Any] = self._status()
+        # Skip the refresh when nothing a reader would notice has changed. The
+        # panel wears out by refresh count, and refresh_now() is deliberately
+        # cheap to call, so this is what keeps a redundant wake from costing a
+        # frame.
         key = (pick_screen(status), status["state"], status["position"], status["ip"],
                round(status["tilt_pct"], 3) if status["tilt_pct"] is not None else None,
                status["samples"] // 250)
         if key == self._last_key:
-            return
+            return status
         self._last_key = key
         show(render(status,
                     contact_face=str(self.cfg.get("contact_face", "bottom")),
                     rotate=int(self.cfg.get("panel_rotation", 90))))
+        return status
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render the e-paper status panel.")
     parser.add_argument("--out", help="Write a PNG instead of driving the panel.")
     parser.add_argument("--position", default="TOP", choices=["UNSET", "BASE", "MIDDLE", "TOP"])
-    parser.add_argument("--screen", choices=[SCREEN_INSTALL, SCREEN_MEASURE, SCREEN_BRAND],
+    parser.add_argument("--screen", choices=[SCREEN_BOOT, SCREEN_INSTALL, SCREEN_RECORDING,
+                                             SCREEN_MEASURE, SCREEN_BRAND],
                         help="Force a screen instead of picking one from the state.")
     parser.add_argument("--contact-face", default="bottom",
                         choices=["bottom", "top", "left", "right"])
@@ -448,10 +545,14 @@ def main() -> int:
         "time_quality": af.QUALITY_SYNCED,
         "ip": local_ip(),
     }
-    if args.screen == SCREEN_BRAND:
+    if args.screen == SCREEN_BOOT:
+        demo["booting"] = True
+    elif args.screen == SCREEN_BRAND:
         demo["state"] = "maintenance"
     elif args.screen == SCREEN_INSTALL:
         demo["state"] = "waiting_stable"
+    elif args.screen == SCREEN_RECORDING:
+        demo["elapsed_s"] = 4
     img = render(demo, contact_face=args.contact_face, rotate=args.rotate)
 
     if args.out:
