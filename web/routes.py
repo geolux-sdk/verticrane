@@ -236,14 +236,6 @@ def register(app: Flask) -> None:
 
     # -- recording control -------------------------------------------------
 
-    @app.post("/api/record/start")
-    def api_start() -> Response:
-        rec: Any = _recorder()
-        if rec is None:
-            return jsonify({"error": "recorder not attached"}), 503
-        started: bool = rec.request_manual_start()
-        return jsonify({"ok": started, "state": rec.snapshot().state})
-
     @app.post("/api/record/stop")
     def api_stop() -> Response:
         rec: Any = _recorder()

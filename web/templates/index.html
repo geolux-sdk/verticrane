@@ -54,11 +54,9 @@
 
   <p style="margin:16px 0 0">
     {% if status.state == "recording" %}
-      <button onclick="post('/api/record/stop')">기록 정지</button>
-    {% else %}
-      <button class="primary" onclick="post('/api/record/start')">지금 기록 시작</button>
+      <button onclick="post('/api/record/stop', '정지를 요청했습니다…')">기록 정지</button>
     {% endif %}
-    <a class="btn" href="{{ url_for('index') }}" style="margin-left:6px">새로 고침</a>
+    <a class="btn" href="{{ url_for('index') }}">새로 고침</a>
   </p>
   <p id="pending" class="small muted" style="margin:10px 0 0; display:none"></p>
   {% else %}
@@ -155,17 +153,15 @@ function collected(name, group) {
     .catch(function () {});
 }
 
-// Starting and stopping are requests, not commands: the recorder waits for the
-// sensor to settle before it opens a file, so reloading straight away showed
-// the state from before the button was pressed. Say what was asked for, and
-// let the poller below redraw the page when it has actually happened.
-function post(url) {
+// A request, not a command: the recorder finishes the block it is on before it
+// closes the file, so reloading straight away showed the state from before the
+// button was pressed. Say what was asked for, and let the poller below redraw
+// the page once it has actually happened.
+function post(url, msg) {
   fetch(url, {method: 'POST'})
     .then(function (r) { return r.json().catch(function () { return {}; }); })
     .then(function (r) {
-      pending(r && r.ok === false
-              ? '지금은 처리할 수 없는 요청입니다.'
-              : '요청했습니다. 센서가 안정되면 시작합니다…');
+      pending(r && r.ok === false ? '지금은 처리할 수 없는 요청입니다.' : msg);
     })
     .catch(function (e) { alert('실패했습니다: ' + e.message); });
 }
@@ -178,11 +174,13 @@ function pending(msg) {
 }
 
 {% if status %}
-// The page keeps itself current, so nobody has to reload to find out whether a
-// recording started. It asks with ?auto=1, which the recorder does not read as
-// someone arriving -- a plain reload while a measurement runs is a visit, and
-// visits suppress auto-recording. That is also why the redraw goes to /?auto=1
-// rather than location.reload().
+// The page keeps itself current rather than showing a state that has already
+// moved on. Arriving here is itself what ends a measurement in progress, so a
+// page that loaded saying 기록 중 is wrong within a second or two of saying it.
+//
+// It asks with ?auto=1, which the recorder does not read as someone arriving --
+// a plain load while a measurement runs is a visit, and visits end it. That is
+// also why the redraw goes to /?auto=1 rather than location.reload().
 (function () {
   var shown = {{ status.state|tojson }};
   setInterval(function () {

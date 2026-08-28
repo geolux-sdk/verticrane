@@ -337,7 +337,6 @@ class Recorder:
         self.status = Status()
         self.stop_event = threading.Event()
         self._http_seen = threading.Event()
-        self._want_start = threading.Event()
         self._want_stop = threading.Event()
         self._want_discard = threading.Event()
         self._lock = threading.Lock()
@@ -364,7 +363,6 @@ class Recorder:
         self._next_purge: float = 0.0
         self._next_ip_check: float = 0.0
         self._panel_ip: Optional[str] = None
-        self._manual: bool = False
         self.panel: Optional[Any] = None
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
@@ -387,11 +385,6 @@ class Recorder:
         what belongs in the operator's list, and it should not be the kind of
         judgement that destroys data if it is wrong.
 
-        None of that applies to a recording the operator started from the page.
-        The reasoning above rests on the recording having begun because nobody
-        was there; when someone pressed the button, they were. Loading the page
-        to watch a measurement they asked for must not destroy it.
-
         The status page's own polling is exempt (it carries ?auto=1), or a
         browser left open in the vehicle would throw away a real measurement the
         moment the WiFi came back into range.
@@ -399,7 +392,7 @@ class Recorder:
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
-        if self.state == RECORDING and not self._manual:
+        if self.state == RECORDING:
             logger.info("Operator connected while recording; discarding this recording")
             self._want_discard.set()
 
@@ -409,17 +402,6 @@ class Recorder:
         # effect from the next recording without a restart (section 8).
         return af.POSITION_VALUES.get(
             str(self.cfg.get("sensor_flag", "unset")).lower(), af.POS_UNSET)
-
-    def request_manual_start(self) -> bool:
-        """Web asked to record now. Still waits for the sensor to settle.
-
-        The settle wait is not skipped: starting mid-swing would put unusable
-        data at the head of the file, which section 4 forbids outright.
-        """
-        if self.state in (RECORDING, WAITING_STABLE):
-            return False
-        self._want_start.set()
-        return True
 
     def request_manual_stop(self) -> bool:
         if self.state != RECORDING:
@@ -593,16 +575,6 @@ class Recorder:
                 logger.info("Stop requested from the web")
                 self._stop_recording()
                 self._set_state(MAINTENANCE)
-        if self._want_start.is_set():
-            self._want_start.clear()
-            if self.state not in (RECORDING, WAITING_STABLE):
-                logger.info("Start requested from the web")
-                self.monitor.reset()
-                # Marks the recording as asked for, which is what stops the
-                # operator's own page loads from throwing it away.
-                self._manual = True
-                self._set_state(WAITING_STABLE)
-
         if self.state == MAINTENANCE:
             # Idle on purpose: someone is here to collect files, so do not add
             # SD-card writes underneath them.
@@ -781,7 +753,6 @@ class Recorder:
         except OSError as exc:
             logger.error("Error closing {}: {}", os.path.basename(path), exc)
         self.writer = None
-        self._manual = False
         logger.info("Stopped recording {} ({} blocks, {} samples)",
                     os.path.basename(path), self.status.blocks, self.status.samples)
         # Same finalising logic the next boot would have run, but this file was
