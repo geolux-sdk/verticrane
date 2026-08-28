@@ -313,6 +313,12 @@ def next_slot(data_dir: str) -> int:
 
     A card that cannot be read gives slot 0. That risks overwriting one
     recording; refusing to record would lose all of them.
+
+    Claimed here, before the file is opened, and given back by release_slot()
+    if that open fails. The order matters: boot recovery finalises a leftover
+    .partial into the slot it was already using, so a counter that had not yet
+    moved past it would hand that number straight back out and the next
+    recording would overwrite what recovery had just saved.
     """
     path: str = os.path.join(data_dir, SLOT_FILE)
     previous: int = -1
@@ -333,6 +339,34 @@ def next_slot(data_dir: str) -> int:
     except OSError as exc:
         logger.error("Could not advance the slot counter: {}", exc)
     return slot
+
+
+def release_slot(data_dir: str, slot: int) -> None:
+    """Give a slot back after the recording that claimed it never opened.
+
+    Only safe because the open failed: nothing was written at that name, so
+    nothing is at risk of being overwritten when the number comes round again
+    a second later. Without this, a card that refuses every open burns a
+    thousand slot numbers in quarter of an hour -- writing to the failing card
+    each time to do it.
+    """
+    path: str = os.path.join(data_dir, SLOT_FILE)
+    try:
+        with open(path, encoding="utf-8") as f:
+            if int(f.read().strip()) != slot:
+                return              # something else has claimed since; leave it
+    except (OSError, ValueError):
+        return
+    tmp: str = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str((slot - 1) % SLOT_COUNT))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        _fsync_dir(data_dir)
+    except OSError as exc:
+        logger.error("Could not give slot {} back: {}", slot, exc)
 
 
 def safe_join(data_dir: str, name: str) -> Optional[str]:
@@ -386,16 +420,19 @@ class Writer:
         self.blocks_written: int = 0
         self.samples_written: int = 0
         self._last_fsync: float = time.monotonic()
-        new: bool = not os.path.exists(path)
-        self._f: BinaryIO = open(path, "w+b" if new else "r+b")
-        if new:
-            self._f.write(header.pack())
-            self._f.flush()
-            os.fsync(self._f.fileno())
-            _fsync_dir(os.path.dirname(os.path.abspath(path)))
-            logger.info("Recording to {}", os.path.basename(path))
-        else:
-            self._f.seek(0, os.SEEK_END)
+        # Always a new file. Appending to whatever was at this path would put
+        # the blocks of two recordings under one header -- the header's start
+        # time belonging to the first, the second's elapsed_ms restarting from
+        # zero. Every block CRC would still pass, so scan() and the operator's
+        # list would both accept it: silent corruption that nothing downstream
+        # can detect. Slots rotate and rotating means overwriting (section 5.1),
+        # so truncating here is the same rule applied one step earlier.
+        self._f: BinaryIO = open(path, "w+b")
+        self._f.write(header.pack())
+        self._f.flush()
+        os.fsync(self._f.fileno())
+        _fsync_dir(os.path.dirname(os.path.abspath(path)))
+        logger.info("Recording to {}", os.path.basename(path))
 
     def write_block(self, block: Block) -> None:
         self._f.write(block.pack())

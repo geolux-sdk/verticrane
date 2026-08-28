@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import shutil
 import signal
@@ -44,6 +45,13 @@ LAST_KNOWN: str = ".lastknown"
 SAMPLE_RATE_HZ: int = 25
 SAMPLE_PERIOD_S: float = 1.0 / SAMPLE_RATE_HZ
 TEMP_REFRESH_S: float = 1.0
+
+# Consecutive failures to open a recording before the device stops trying and
+# waits for someone. Retries run about once a second, so five rides out a
+# momentary glitch and gives up on a card that is actually gone. Stopping at
+# the first failure would throw away a day's measurement over one hiccup;
+# never stopping means logging the same error until the power is cut.
+OPEN_FAILURE_LIMIT: int = 5
 ANGLE_BLOCK: tuple[int, int] = (0x34, 15)
 TEMP_REG: tuple[int, int] = (0x43, 1)
 SERIAL_REG: tuple[int, int] = (0x7F, 6)
@@ -316,6 +324,7 @@ class Recorder:
         self._since_judged: int = 0
         self._next_purge: float = 0.0
         self._next_ip_check: float = 0.0
+        self._open_failures: int = 0
         self._panel_ip: Optional[str] = None
         self.panel: Optional[Any] = None
         self._unstable_since: float = 0.0
@@ -374,7 +383,12 @@ class Recorder:
             self.status.free_mb = _free_mb(self.data_dir)
             if self._record_start_mono:
                 self.status.elapsed_s = time.monotonic() - self._record_start_mono
-            return self.status
+            # A copy, so the web and the panel read one consistent moment rather
+            # than fields the recording loop is still changing underneath them.
+            # Shallow is enough: every field is a scalar, and the two that are
+            # not -- config_warnings and stability -- are replaced wholesale
+            # rather than mutated in place.
+            return copy.copy(self.status)
 
     def request_stop(self) -> None:
         self.stop_event.set()
@@ -681,8 +695,8 @@ class Recorder:
     def _start_recording(self) -> None:
         self._record_start_epoch = self.time.now()
         self._record_start_mono = time.monotonic()
-        name: str = af.build_filename(self.position, af.next_slot(self.data_dir),
-                                      partial=True)
+        slot: int = af.next_slot(self.data_dir)
+        name: str = af.build_filename(self.position, slot, partial=True)
         path: str = os.path.join(self.data_dir, name)
         header = af.Header(
             start_epoch=self._record_start_epoch,
@@ -695,9 +709,22 @@ class Recorder:
             self.writer = af.Writer(
                 path, header, float(self.cfg["record_fsync_interval_seconds"]))
         except OSError as exc:
-            logger.error("Cannot open {}: {}", name, exc)
+            # Nothing was written, so the number can go back -- otherwise a card
+            # that refuses every open walks the counter through a thousand slots
+            # in a quarter of an hour, writing to the failing card each time.
+            af.release_slot(self.data_dir, slot)
+            self._open_failures += 1
+            logger.error("Cannot open {} ({}/{}): {}",
+                         name, self._open_failures, OPEN_FAILURE_LIMIT, exc)
             self.status.error = str(exc)
+            if self._open_failures >= OPEN_FAILURE_LIMIT:
+                # Past here it is the card, not a hiccup. Stop and say so rather
+                # than log the same line every second until someone notices.
+                logger.error("Giving up after {} failed attempts to open a "
+                             "recording", self._open_failures)
+                self._set_state(MAINTENANCE)
             return
+        self._open_failures = 0
         self.status.file = name
         self.status.started_at = self._record_start_epoch
         self.status.samples = 0
