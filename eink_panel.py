@@ -352,7 +352,7 @@ def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
     ip: Optional[str] = status.get("ip")
     if ip:
-        _centre(d, FOOT_Y + 10, ip, _fit(d, ip, WIDTH - 12, 22, bold=True), 0)
+        _centre(d, FOOT_Y + 14, ip, _fit(d, ip, WIDTH - 12, 16, bold=True), 0)
     else:
         d.rectangle([4, FOOT_Y + 6, WIDTH - 5, FOOT_Y + 34], fill=0)
         _centre(d, FOOT_Y + 10, "NO NETWORK", _font(18, bold=True), 255)
@@ -433,7 +433,7 @@ class PanelThread:
         self.cfg = cfg
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._last_key: Optional[tuple] = None
+        self._last_frame: Optional[bytes] = None
         self._thread: Optional[threading.Thread] = None
         self._started: float = time.monotonic()
 
@@ -504,20 +504,26 @@ class PanelThread:
         }
 
     def _draw(self) -> dict[str, Any]:
+        """Render every time, push only when the picture actually differs.
+
+        Comparing the finished frame rather than the fields behind it is what
+        makes refresh_now() safe to over-call. Comparing fields meant guessing
+        which ones each screen reads, and guessing wrong cost a refresh: the
+        boot frame ignores the state, so the recorder settling its first state
+        underneath it used to redraw the identical picture.
+
+        Rendering is a few milliseconds of PIL against 1.4 s of SPI, so the
+        render that turns out to be redundant is the cheap half.
+        """
         status: dict[str, Any] = self._status()
-        # Skip the refresh when nothing a reader would notice has changed. The
-        # panel wears out by refresh count, and refresh_now() is deliberately
-        # cheap to call, so this is what keeps a redundant wake from costing a
-        # frame.
-        key = (pick_screen(status), status["state"], status["position"], status["ip"],
-               round(status["tilt_pct"], 3) if status["tilt_pct"] is not None else None,
-               status["samples"] // 250)
-        if key == self._last_key:
+        img = render(status,
+                     contact_face=str(self.cfg.get("contact_face", "bottom")),
+                     rotate=int(self.cfg.get("panel_rotation", 90)))
+        frame: bytes = img.tobytes()
+        if frame == self._last_frame:
             return status
-        self._last_key = key
-        show(render(status,
-                    contact_face=str(self.cfg.get("contact_face", "bottom")),
-                    rotate=int(self.cfg.get("panel_rotation", 90))))
+        self._last_frame = frame
+        show(img)
         return status
 
 
