@@ -970,6 +970,19 @@ def main() -> int:
     rec = Recorder(port_config.resolve_port(args.port), cfg, args.data_dir,
                    fail_on_no_sensor=args.require_sensor)
 
+    # Before the web server, not after. Starting the thread returns at once --
+    # the frame is drawn on it -- while bringing Flask up costs a second and a
+    # bit, and that second is one more in which the panel still shows whatever
+    # was on it when the power was cut. Nobody is waiting for the web server
+    # at this point in a boot; somebody may well be standing over the panel.
+    if not args.no_panel:
+        try:
+            import eink_panel
+            rec.panel = eink_panel.PanelThread(rec, cfg)
+            rec.panel.start()
+        except Exception as exc:                          # noqa: BLE001
+            logger.error("Panel unavailable ({}); recording anyway", exc)
+
     if not args.no_web:
         try:
             import web
@@ -978,14 +991,6 @@ def main() -> int:
             # No Flask on this machine: keep recording rather than refusing to
             # start. The measurement matters more than the web page.
             logger.error("Web interface unavailable ({}); recording anyway", exc)
-
-    if not args.no_panel:
-        try:
-            import eink_panel
-            rec.panel = eink_panel.PanelThread(rec, cfg)
-            rec.panel.start()
-        except Exception as exc:                          # noqa: BLE001
-            logger.error("Panel unavailable ({}); recording anyway", exc)
 
     # systemd sends SIGTERM on stop; finish the current block rather than
     # leaving a torn tail for the next boot to trim.
