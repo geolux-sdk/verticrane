@@ -652,8 +652,21 @@ class Recorder:
         try:
             self.writer.write_block(block)
         except OSError as exc:
-            logger.error("Write failed: {}", exc)
+            # Drop the block before stopping, and note why that is not just
+            # tidiness. Stopping flushes what is pending, and what is pending is
+            # the block that just failed -- leaving it there sends the same
+            # bytes back to the same card, which refuses them again, which stops
+            # the recording again. That recursion ends in a RecursionError and
+            # takes the process down, which is the one outcome this project
+            # rates worst: a device that quietly stopped recording.
+            #
+            # The card refused these 25 samples, so they are gone whatever
+            # happens next. Saying so in the log is the honest version of
+            # losing them.
+            logger.error("Write failed, dropping {} samples: {}", block.count, exc)
             self.status.error = str(exc)
+            self._pending.clear()
+            self._block_flags = 0
             self._stop_recording()
             return
         self.status.samples += block.count
