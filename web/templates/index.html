@@ -132,10 +132,21 @@
 </div>
 
 <script>
+// Set when a transfer starts; cleared by the reload that follows it, or by the
+// operator's next page load.
+var downloading = false;
+
 // The browser is already downloading by the time this runs -- the link is not
 // cancelled -- so this only tells the device the file has been collected.
 // A native download is independent of the page, so the reload does not disturb it.
+//
+// The state poller stands down all the same. An earlier version of this page
+// reloaded on a timer and tore transfers down mid-flight; that download read
+// the file into a blob and the poller reloads only on a state change, so
+// neither half of that failure is still here -- but a transfer the operator
+// drove up a crane to start is not the place to rely on that reasoning.
 function collected(name, group) {
+  downloading = true;
   var url = name
     ? '/api/files/' + encodeURIComponent(name) + '/collected'
     : '/api/groups/' + group + '/collected';
@@ -175,9 +186,11 @@ function pending(msg) {
 (function () {
   var shown = {{ status.state|tojson }};
   setInterval(function () {
+    if (downloading) { return; }
     fetch('/api/status?auto=1', {cache: 'no-store'})
       .then(function (r) { return r.json(); })
       .then(function (s) {
+        if (downloading) { return; }
         if (s.state && s.state !== shown) { location.replace('/?auto=1'); }
       })
       .catch(function () {});      // the WiFi drops as the vehicle moves off

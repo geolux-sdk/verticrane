@@ -14,7 +14,8 @@
       "Bash(python \"C:/Users/sdkim/AppData/Local/Temp/claude/d--python-verticrane/2f96ffd5-f6d6-453d-9acf-ba13be4359a0/scratchpad/add_spi.py\")",
       "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -3 && sudo systemctl restart verticrane-recorder && echo RESTARTED')",
       "Bash(python test_eink_panel.py)",
-      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && echo RESTARTED')"
+      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && echo RESTARTED')",
+      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && sleep 8 && curl -s \"http://127.0.0.1:8080/?auto=1\" | grep -cE \"downloading|api/status\" && echo OK')"
     ]
   }
 }
