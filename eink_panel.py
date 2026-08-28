@@ -40,7 +40,7 @@ HEIGHT: int = 200
 
 # Layout bands. Kept as constants because 200x200 leaves no room to guess.
 TITLE_H: int = 26
-FOOT_Y: int = 156
+FOOT_Y: int = 166
 
 # Which screen to draw. The panel shows one thing at a time because 200x200
 # cannot show three, and because what matters changes completely between
@@ -352,10 +352,11 @@ def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     d.line([4, FOOT_Y, WIDTH - 5, FOOT_Y], fill=0, width=1)
     ip: Optional[str] = status.get("ip")
     if ip:
-        _centre(d, FOOT_Y + 14, ip, _fit(d, ip, WIDTH - 12, 16, bold=True), 0)
+        _centre(d, FOOT_Y + 8, ip, _fit(d, ip, WIDTH - 12, 16, bold=True), 0)
     else:
-        d.rectangle([4, FOOT_Y + 6, WIDTH - 5, FOOT_Y + 34], fill=0)
-        _centre(d, FOOT_Y + 10, "NO NETWORK", _font(18, bold=True), 255)
+        d.rectangle([4, FOOT_Y + 4, WIDTH - 5, HEIGHT - 3], fill=0)
+        _centre(d, FOOT_Y + 8, "NO NETWORK",
+                _fit(d, "NO NETWORK", WIDTH - 24, 16, bold=True), 255)
 
 
 def _temp(value: Optional[float]) -> str:
