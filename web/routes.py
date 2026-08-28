@@ -142,7 +142,6 @@ def register(app: Flask) -> None:
             "tilt_pct": round(snap.tilt, 4) if snap.tilt is not None else None,
             "temp_c": snap.temp_c,
             "sensor_ok": snap.sensor_ok,
-            "time_quality": snap.time_quality,
             "device_time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "stability": snap.stability,
             "free_mb": round(snap.free_mb, 1),

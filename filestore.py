@@ -30,9 +30,9 @@ class FileInfo:
     duration_s: float
     samples: int
     blocks: int
-    trusted: bool                  # False means the timestamp is a guess
     recovered: bool                # True means the tail was lost to a power cut
     position: str = "UNSET"        # BASE / MIDDLE / TOP
+    slot: int = 0                  # the rotating number in the name
     group: int = 0
 
     @property
@@ -48,9 +48,9 @@ class FileInfo:
             "duration_s": round(self.duration_s, 1),
             "samples": self.samples,
             "blocks": self.blocks,
-            "trusted_time": self.trusted,
             "recovered": self.recovered,
             "position": self.position,
+            "slot": self.slot,
             "group": self.group,
         }
 
@@ -98,18 +98,18 @@ def describe(path: str) -> Optional[FileInfo]:
     if blocks == 0:
         return None
     parsed: Optional[dict] = af.parse_filename(path)
-    start, _quality = af.effective_start(path)
+    header: af.Header = af.read_header(path)
     return FileInfo(
         name=os.path.basename(path),
         path=path,
         size=os.path.getsize(path),
-        start_epoch=start,
+        start_epoch=header.start_epoch,
         duration_s=duration,
         samples=samples,
         blocks=blocks,
-        trusted=bool(parsed["trusted"]) if parsed else False,
-        recovered=bool(parsed["recovered"]) if parsed else False,
+        recovered=header.recovered,
         position=str(parsed["position_name"]) if parsed else "UNSET",
+        slot=int(parsed["slot"]) if parsed else 0,
     )
 
 
@@ -179,9 +179,6 @@ def move_to_trash(data_dir: str, names: list[str]) -> list[str]:
         dest: str = os.path.join(target, name)
         try:
             os.replace(src, dest)
-            sidecar: str = af.timeinfo_path(src)
-            if os.path.exists(sidecar):
-                os.replace(sidecar, af.timeinfo_path(dest))
             moved.append(name)
             logger.info("Downloaded, moved to trash: {}", name)
         except OSError as exc:
@@ -202,7 +199,7 @@ def purge_trash(data_dir: str, retention_days: float = 7.0,
     entries: list[tuple[float, str]] = []
     for name in os.listdir(target):
         path: str = os.path.join(target, name)
-        if name.endswith(af.TIMEINFO_SUFFIX) or not os.path.isfile(path):
+        if not os.path.isfile(path):
             continue
         try:
             entries.append((os.path.getmtime(path), path))
@@ -221,9 +218,6 @@ def purge_trash(data_dir: str, retention_days: float = 7.0,
         try:
             size: int = os.path.getsize(path)
             os.remove(path)
-            sidecar: str = af.timeinfo_path(path)
-            if os.path.exists(sidecar):
-                os.remove(sidecar)
             freed += size
             removed += 1
             logger.info("Purged from trash: {} ({})", os.path.basename(path),

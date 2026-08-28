@@ -17,7 +17,7 @@
 # Everything about wall-clock time lives OUTSIDE the binary. The header carries
 # what the device believed at the moment recording started, which may be wrong
 # (the Pi has no RTC). The authoritative start time is the one in the FILENAME,
-# fixed up during boot recovery from the .timeinfo sidecar. See sections 3, 5
+# established once when the file is opened and never revised. See sections 3, 5
 # and 6 of TILT_기록시스템_구현요구사항.md.
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from typing import BinaryIO, Iterator, Optional
 from loguru import logger
 
 MAGIC: bytes = b"AHRSBIN\0"
-FORMAT_VERSION: int = 1
+FORMAT_VERSION: int = 2
 HEADER_SIZE: int = 64
 BLOCK_SIZE: int = 1232
 SAMPLES_PER_BLOCK: int = 25
@@ -43,8 +43,9 @@ FLOATS_PER_SAMPLE: int = 12
 DEFAULT_SAMPLE_RATE_HZ: int = 25
 
 # Header: magic, version, block size, samples/block, rate, start epoch,
-# SENSOR_ID, SENSOR_FLAG, device serial, reserved, CRC32 over the first 60 bytes.
-_HEADER_FMT: str = "<8sHHHHd16sH12s6sI"
+# SENSOR_ID, SENSOR_FLAG, device serial, file flags, reserved, CRC32 over the
+# first 60 bytes.
+_HEADER_FMT: str = "<8sHHHHd16sH12sB5sI"
 # Block: count, flags, duration (ms), reserved, elapsed (ms), temperature,
 # reserved, 25 x 12 floats, reserved, CRC32 over the first 1228 bytes.
 _BLOCK_FMT: str = "<HHHHQfI{0}fII".format(SAMPLES_PER_BLOCK * FLOATS_PER_SAMPLE)
@@ -67,35 +68,29 @@ POSITION_NAMES: dict[int, str] = {POS_UNSET: "UNSET", POS_BASE: "BASE",
                                   POS_MIDDLE: "MIDDLE", POS_TOP: "TOP"}
 POSITION_VALUES: dict[str, int] = {v.lower(): k for k, v in POSITION_NAMES.items()}
 
-# Time quality. Only ever recorded in the filename and the .timeinfo sidecar --
-# never in the header, so a rename can never contradict the file contents.
-QUALITY_INVALID: str = "invalid"
-QUALITY_UNSYNCED: str = "unsynced"
-QUALITY_SYNCED: str = "synced"
-QUALITY_RTC: str = "rtc"
-TRUSTED_QUALITIES: frozenset[str] = frozenset({QUALITY_SYNCED, QUALITY_RTC})
+# File-level status, in the header rather than beside it. One fact lives here:
+# a recording that lost its end to a power cut. It is known only at recovery,
+# which is the one moment nothing else is touching the file, so the header is
+# rewritten once and never again.
+FILE_FLAG_RECOVERED: int = 1 << 0
 
-EXT: str = ".ahrsbin"
+EXT: str = ".dat"
 PARTIAL_SUFFIX: str = ".partial"
-TIMEINFO_SUFFIX: str = ".timeinfo"
 
-# FLAG_[bNNNN_]YYYYMMDD_HHMMSS[.recovered][.unsynced][_N].ahrsbin -- checked
-# before any path is opened, so a request can never walk out of the data
-# directory.
+# Recordings occupy numbered slots and the numbering goes round. The device is
+# a buffer between the crane and the operator's laptop, not a store: a file
+# still here a thousand recordings later is a collection that never happened,
+# and holding on to it at the cost of the recording being made now would be
+# the wrong way round.
+SLOT_COUNT: int = 1000
+SLOT_FILE: str = ".slot"
+
+# FLAG_NNN.dat -- checked before any path is opened, so a request can never
+# walk out of the data directory. Nothing else is encoded here: the name is an
+# address on the card, and what the recording *is* lives inside it.
 FILENAME_RE: re.Pattern[str] = re.compile(
-    r"^(?P<flag>UNSET|BASE|MIDDLE|TOP)_"
-    r"(?:b(?P<boot>\d{4,})_)?"
-    r"(?P<stamp>\d{8}_\d{6})"
-    # The marks are read as a set, not a sequence. A file can carry both -- a
-    # recording that started on an untrusted clock and then lost its tail to a
-    # power cut -- and fixing their order here once made exactly those files
-    # unparseable, so they vanished from the operator's list and could not even
-    # be downloaded by name.
-    r"(?P<marks>(?:\.recovered|\.unsynced)*)"
-    r"(?:_(?P<dup>\d+))?"           # the collision counter _unique_path appends
-    r"\.ahrsbin$"
+    r"^(?P<flag>UNSET|BASE|MIDDLE|TOP)_(?P<slot>\d{3})\.dat$"
 )
-_STAMP_FMT: str = "%Y%m%d_%H%M%S"
 
 
 class FormatError(Exception):
@@ -121,6 +116,11 @@ class Header:
     samples_per_block: int = SAMPLES_PER_BLOCK
     block_size: int = BLOCK_SIZE
     version: int = FORMAT_VERSION
+    flags: int = 0                 # FILE_FLAG_*, set once by recovery
+
+    @property
+    def recovered(self) -> bool:
+        return bool(self.flags & FILE_FLAG_RECOVERED)
 
     @property
     def position_name(self) -> str:
@@ -134,7 +134,8 @@ class Header:
             self.sensor_id.encode("ascii", "replace")[:16],
             self.position,
             self.device_serial.encode("ascii", "replace")[:12],
-            b"\0" * 6,
+            self.flags,
+            b"\0" * 5,
         )
         return body + struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
 
@@ -143,7 +144,8 @@ class Header:
         if len(raw) != HEADER_SIZE:
             raise FormatError("header is {0} bytes, expected {1}".format(len(raw), HEADER_SIZE))
         (magic, version, block_size, samples_per_block, rate, start_epoch,
-         sensor_id, position, serial, _reserved, crc) = struct.unpack(_HEADER_FMT, raw)
+         sensor_id, position, serial, flags, _reserved, crc) = struct.unpack(
+            _HEADER_FMT, raw)
         if magic != MAGIC:
             raise FormatError("bad magic {0!r}".format(magic))
         if zlib.crc32(raw[:-4]) & 0xFFFFFFFF != crc:
@@ -159,6 +161,7 @@ class Header:
             samples_per_block=samples_per_block,
             block_size=block_size,
             version=version,
+            flags=flags,
         )
 
 
@@ -266,34 +269,26 @@ class Block:
 # Filenames
 # --------------------------------------------------------------------------
 
-def build_filename(start_epoch: float, quality: str, position: int = POS_UNSET,
-                   boot_count: int = 0, recovered: bool = False,
+def build_filename(position: int = POS_UNSET, slot: int = 0,
                    partial: bool = False) -> str:
-    """Compose a filename from the position, the start time, and how much that
-    time is trusted.
+    """Compose the name of a recording slot.
 
-    The position leads: three devices on one crane would otherwise produce the
-    same name and overwrite each other the moment an operator collects all three.
+    The name is an address on the card, not a description of what is in it.
+    When the recording started, how far that time can be trusted and whether
+    the tail survived all live in the header itself, where
+    nothing that happens to the name can contradict them.
+
+    The position leads because three devices share one crane: without it they
+    would write the same slots and overwrite each other the moment an operator
+    collected all three into one folder.
     """
-    stamp: str = time.strftime(_STAMP_FMT, time.localtime(start_epoch))
-    name: str = POSITION_NAMES.get(position, "UNSET") + "_"
-    if quality not in TRUSTED_QUALITIES:
-        # The boot counter keeps names unique and orderable when the clock is
-        # not usable -- fake-hwclock can restore the same value every boot.
-        name += "b{0:04d}_".format(boot_count)
-    name += stamp
-    if recovered:
-        name += ".recovered"
-    if quality not in TRUSTED_QUALITIES:
-        name += ".unsynced"
-    name += EXT
-    if partial:
-        name += PARTIAL_SUFFIX
-    return name
+    name: str = "{0}_{1:03d}{2}".format(POSITION_NAMES.get(position, "UNSET"),
+                                        slot % SLOT_COUNT, EXT)
+    return name + PARTIAL_SUFFIX if partial else name
 
 
 def parse_filename(name: str) -> Optional[dict]:
-    """Pull the position, start time and trust level back out of a filename.
+    """Pull the position and slot back out of a name.
 
     Returns None when the name does not match exactly, which is also the
     path-traversal guard: no separators or dots can survive this.
@@ -301,21 +296,43 @@ def parse_filename(name: str) -> Optional[dict]:
     m = FILENAME_RE.match(os.path.basename(name))
     if m is None:
         return None
-    try:
-        start_epoch: float = time.mktime(time.strptime(m.group("stamp"), _STAMP_FMT))
-    except ValueError:
-        return None
-    marks: list[str] = [part for part in m.group("marks").split(".") if part]
-    if len(set(marks)) != len(marks):
-        return None                      # ".recovered.recovered" is not a name we write
     return {
-        "start_epoch": start_epoch,
         "position": POSITION_VALUES.get(m.group("flag").lower(), POS_UNSET),
         "position_name": m.group("flag"),
-        "boot_count": int(m.group("boot")) if m.group("boot") else 0,
-        "trusted": QUALITY_UNSYNCED not in marks,
-        "recovered": "recovered" in marks,
+        "slot": int(m.group("slot")),
     }
+
+
+def next_slot(data_dir: str) -> int:
+    """The slot to record into next, counting 000..999 and then round again.
+
+    Kept on the card rather than derived from what is there, so collecting
+    files does not hand their numbers back out. Two recordings made either
+    side of a collection get different names, which is what lets an operator
+    put them in one folder.
+
+    A card that cannot be read gives slot 0. That risks overwriting one
+    recording; refusing to record would lose all of them.
+    """
+    path: str = os.path.join(data_dir, SLOT_FILE)
+    previous: int = -1
+    try:
+        with open(path, encoding="utf-8") as f:
+            previous = int(f.read().strip())
+    except (OSError, ValueError):
+        pass
+    slot: int = (previous + 1) % SLOT_COUNT
+    tmp: str = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str(slot))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        _fsync_dir(data_dir)
+    except OSError as exc:
+        logger.error("Could not advance the slot counter: {}", exc)
+    return slot
 
 
 def safe_join(data_dir: str, name: str) -> Optional[str]:
@@ -335,37 +352,6 @@ def safe_join(data_dir: str, name: str) -> Optional[str]:
     if os.path.dirname(path) != root:
         return None
     return path
-
-
-# --------------------------------------------------------------------------
-# Time info sidecar
-# --------------------------------------------------------------------------
-
-def timeinfo_path(data_path: str) -> str:
-    # Sits next to the recording, including while it is still .partial.
-    return data_path + TIMEINFO_SUFFIX
-
-
-def write_timeinfo(data_path: str, info: dict) -> None:
-    """Replace the sidecar atomically: temp file -> fsync -> rename -> dir fsync."""
-    path: str = timeinfo_path(data_path)
-    tmp: str = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(info, f, indent=2, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-    _fsync_dir(os.path.dirname(path) or ".")
-
-
-def read_timeinfo(data_path: str) -> Optional[dict]:
-    try:
-        with open(timeinfo_path(data_path), encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        # A missing or damaged sidecar costs only the corrected time; the
-        # recording itself stays intact and keeps its .unsynced name.
-        return None
 
 
 def _fsync_dir(path: str) -> None:
@@ -504,20 +490,24 @@ def scan(path: str) -> Summary:
     return summary
 
 
-def effective_start(path: str) -> tuple[float, str]:
-    """Best known start time for a file, and how much it is trusted.
+def start_epoch(path: str) -> float:
+    """When the device believed this recording started.
 
-    The filename wins over the header: the header holds what the device
-    believed at the time, the name holds what recovery worked out (section 5.2).
+    The one answer there is. It went into the header when the file was opened
+    and nothing revises it: the clock may have been wrong and the device has
+    no way to find out, so calling it anything more certain than "what the
+    device believed" would be a claim nobody can back.
+
+    Ordering and grouping rest on this and are sound for it -- every recording
+    on a card came off the same clock, so the differences between them hold
+    even where the absolute value does not.
     """
-    parsed: Optional[dict] = parse_filename(path)
-    if parsed is not None:
-        quality: str = QUALITY_SYNCED if parsed["trusted"] else QUALITY_UNSYNCED
-        return float(parsed["start_epoch"]), quality
-    info: Optional[dict] = read_timeinfo(path)
-    if info and info.get("corrected_start_epoch"):
-        return float(info["corrected_start_epoch"]), str(info.get("quality", QUALITY_SYNCED))
-    return read_header(path).start_epoch, QUALITY_UNSYNCED
+    return read_header(path).start_epoch
+
+
+def was_recovered(path: str) -> bool:
+    """True if this recording lost its end to a power cut."""
+    return read_header(path).recovered
 
 
 # --------------------------------------------------------------------------
@@ -526,15 +516,20 @@ def effective_start(path: str) -> tuple[float, str]:
 
 def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
                     mark_recovered: bool = True) -> Optional[str]:
-    """Verify a leftover .partial, trim the torn tail, and give it its final name.
+    """Verify a leftover .partial, trim the torn tail, and finalise it.
 
     This is the normal end of a recording: in the field the power simply drops,
     so nothing gets finalised at shutdown (section 6). Returns the new path, or
     None if the file was unusable and got moved aside.
 
+    Finalising is now only the loss of the .partial suffix -- the slot was
+    settled when the recording opened. What recovery still decides is what the
+    sidecar says: the corrected start time if one arrived, and whether the tail
+    was lost.
+
     mark_recovered=False is for the rare orderly stop, where the tail is known
-    to be complete. The .recovered mark means "this file lost its end", so
-    putting it on a cleanly closed file would misinform the operator.
+    to be complete. "recovered" means "this file lost its end", so putting it
+    on a cleanly closed file would misinform the operator.
     """
     directory: str = os.path.dirname(os.path.abspath(partial_path))
     base: str = os.path.basename(partial_path)
@@ -561,98 +556,21 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
             os.fsync(f.fileno())
         logger.info("{}: trimmed to {} intact blocks", base, summary.blocks)
 
-    info: Optional[dict] = read_timeinfo(partial_path)
-    if info and info.get("corrected_start_epoch"):
-        start_epoch: float = float(info["corrected_start_epoch"])
-        quality: str = str(info.get("quality", QUALITY_SYNCED))
-        logger.info("{}: applying {:+.2f}s correction from .timeinfo",
-                    base, float(info.get("offset_seconds", 0.0)))
-    else:
-        # No usable correction: keep the device's own idea of the time. The
-        # data is intact, only the timestamp stays untrusted -- and the
-        # .unsynced suffix says so.
-        start_epoch = summary.header.start_epoch
-        quality = QUALITY_UNSYNCED
-        logger.warning("{}: no time correction available; staying unsynced", base)
+    if mark_recovered:
+        # The one fact recovery establishes, written where it will travel with
+        # the file. Safe to rewrite the header here and nowhere else: nothing
+        # is reading or appending to a .partial at boot.
+        header: Header = summary.header
+        header.flags |= FILE_FLAG_RECOVERED
+        with open(partial_path, "r+b") as f:
+            f.write(header.pack())
+            os.fsync(f.fileno())
 
-    boot_count: int = int(info.get("boot_count", 0)) if info else 0
-    final_name: str = build_filename(start_epoch, quality, summary.header.position,
-                                     boot_count, recovered=mark_recovered)
-    final_path: str = _unique_path(os.path.join(directory, final_name))
-
+    final_path: str = os.path.join(directory, base[:-len(PARTIAL_SUFFIX)])
     os.replace(partial_path, final_path)
-    old_sidecar: str = timeinfo_path(partial_path)
-    if os.path.exists(old_sidecar):
-        os.replace(old_sidecar, timeinfo_path(final_path))
     _fsync_dir(directory)
     logger.info("Recovered {} -> {}", base, os.path.basename(final_path))
     return final_path
-
-
-def apply_correction(path: str, offset_seconds: float) -> Optional[str]:
-    """Re-time a finalised recording once the clock turns out to be known.
-
-    Returns the new path, or None if the name says the time was already
-    trusted and there is nothing to correct.
-
-    Only ever right for files written in the boot that just learned the
-    offset: monotonic time ran unbroken across them, so the one correction
-    fits them all. A file carried over from an earlier boot must be left
-    alone -- fake-hwclock restores a value nobody measured, so its error was
-    never known, and a trusted-looking name on a guessed time is worse than
-    an honest .unsynced one.
-
-    The rename lands before the sidecar is rewritten. Interrupted in between,
-    the file still reads correctly: effective_start() takes the filename over
-    the sidecar, so the name that just became true wins over the note that has
-    not caught up.
-    """
-    parsed: Optional[dict] = parse_filename(path)
-    if parsed is None:
-        raise FormatError("not a recording name: {0}".format(os.path.basename(path)))
-    if parsed["trusted"]:
-        return None
-
-    directory: str = os.path.dirname(os.path.abspath(path))
-    corrected: float = float(parsed["start_epoch"]) + offset_seconds
-    final_name: str = build_filename(corrected, QUALITY_SYNCED,
-                                     int(parsed["position"]),
-                                     int(parsed["boot_count"]),
-                                     recovered=bool(parsed["recovered"]))
-    final_path: str = _unique_path(os.path.join(directory, final_name))
-
-    os.replace(path, final_path)
-    old_sidecar: str = timeinfo_path(path)
-    if os.path.exists(old_sidecar):
-        os.replace(old_sidecar, timeinfo_path(final_path))
-
-    info: dict = read_timeinfo(final_path) or {}
-    info.update({
-        "device_start_epoch": info.get("device_start_epoch", parsed["start_epoch"]),
-        "corrected_start_epoch": corrected,
-        "offset_seconds": float(info.get("offset_seconds", 0.0)) + offset_seconds,
-        "quality": QUALITY_SYNCED,
-        "source": "ntp",
-        "boot_count": parsed["boot_count"],
-        "original_filename": info.get("original_filename", os.path.basename(path)),
-    })
-    write_timeinfo(final_path, info)
-    _fsync_dir(directory)
-    return final_path
-
-
-def _unique_path(path: str) -> str:
-    # Two recordings can land on the same name when the clock is untrusted and
-    # the boot counter did not advance. Never overwrite an existing recording:
-    # data already collected is worth more than a tidy name.
-    if not os.path.exists(path):
-        return path
-    stem: str = path[:-len(EXT)]
-    for n in range(2, 1000):
-        candidate: str = "{0}_{1}{2}".format(stem, n, EXT)
-        if not os.path.exists(candidate):
-            return candidate
-    raise FormatError("cannot find a free name for {0}".format(path))
 
 
 def _quarantine(path: str, corrupt_dir: Optional[str]) -> None:
@@ -662,9 +580,6 @@ def _quarantine(path: str, corrupt_dir: Optional[str]) -> None:
     target: str = os.path.join(corrupt_dir, os.path.basename(path))
     try:
         os.replace(path, target)
-        sidecar: str = timeinfo_path(path)
-        if os.path.exists(sidecar):
-            os.replace(sidecar, timeinfo_path(target))
         logger.warning("Moved {} to {}", os.path.basename(path), corrupt_dir)
     except OSError as exc:
         logger.error("Could not quarantine {}: {}", path, exc)
@@ -695,7 +610,7 @@ def group_contiguous(paths: list[str], gap_tolerance_s: float = 2.0) -> list[lis
         except (FormatError, OSError) as exc:
             logger.warning("Skipping {}: {}", os.path.basename(path), exc)
             continue
-        entries.append((effective_start(path)[0], path, summary))
+        entries.append((start_epoch(path), path, summary))
     entries.sort(key=lambda e: e[0])
 
     groups: list[list[str]] = []
@@ -722,11 +637,11 @@ def merge(paths: list[str], out_path: str) -> str:
     """
     if not paths:
         raise ValueError("nothing to merge")
-    base_start: float = effective_start(paths[0])[0]
+    base_start: float = start_epoch(paths[0])
     with open(out_path, "wb") as out:
         out.write(read_header(paths[0]).pack())
         for path in paths:
-            offset_ms: int = int(round((effective_start(path)[0] - base_start) * 1000.0))
+            offset_ms: int = int(round((start_epoch(path) - base_start) * 1000.0))
             for block in iter_blocks(path):
                 block.elapsed_ms += offset_ms
                 out.write(block.pack())

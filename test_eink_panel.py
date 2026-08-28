@@ -58,7 +58,6 @@ class _Recorder:
         temp_c = None
         samples = 0
         elapsed_s = 0.0
-        time_quality = "synced"
 
     def snapshot(self) -> Any:
         return self._Snap()
@@ -109,7 +108,7 @@ def test_frames() -> None:
     base: dict[str, Any] = {
         "sensor_id": "pi-test", "position": "TOP", "state": "recording",
         "tilt_pct": 0.062, "temp_c": 26.3, "samples": 1200, "elapsed_s": 4.0,
-        "time_quality": "synced", "ip": "192.168.0.19",
+        "ip": "192.168.0.19",
     }
     frames: dict[str, Any] = {}
     for label, extra in (("부팅", {"booting": True}),

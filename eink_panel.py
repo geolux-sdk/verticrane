@@ -33,8 +33,6 @@ from typing import Any, Optional
 from loguru import logger
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-import ahrs_file as af
-
 WIDTH: int = 200
 HEIGHT: int = 200
 
@@ -502,7 +500,6 @@ class PanelThread:
             "temp_c": snap.temp_c,
             "samples": snap.samples,
             "elapsed_s": snap.elapsed_s,
-            "time_quality": snap.time_quality,
             "ip": local_ip(),
             "booting": (time.monotonic() - self._started) < BOOT_SPLASH_S,
         }
@@ -552,7 +549,6 @@ def main() -> int:
         "tilt_pct": 0.062,
         "temp_c": 26.3,
         "samples": 12475, "elapsed_s": 8123,
-        "time_quality": af.QUALITY_SYNCED,
         "ip": local_ip(),
     }
     if args.screen == SCREEN_BOOT:

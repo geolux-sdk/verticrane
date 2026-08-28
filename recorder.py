@@ -80,81 +80,37 @@ RECONNECT_MAX_S: float = 30.0
 # --------------------------------------------------------------------------
 
 class TimeKeeper:
-    """Works out what time it is on a board with no RTC (section 3).
+    """Keeps the clock from going backwards on a board with no RTC (section 3).
 
     Never sets the system clock -- that needs privileges the service does not
-    have. It keeps an internal offset instead, which is all the file naming
-    needs. When NTP lands, the kernel clock becomes right and the offset is
-    dropped; the difference between the two is the correction that goes into
-    .timeinfo.
+    have. It keeps an internal offset instead, which is all a header timestamp
+    needs.
+
+    It no longer chases NTP. Nothing here claims the time is right: the header
+    records what the device believed and says nothing more. What this class
+    still earns is *ordering* -- restoring the last known time means two
+    recordings made either side of a power cut stay in the order they happened,
+    and the file list and the continuity grouping both rest on that.
     """
 
-    _SYNC_MARKER: str = "/run/systemd/timesync/synchronized"
-
-    def __init__(self, data_dir: str, min_valid_year: int = 2026) -> None:
+    def __init__(self, data_dir: str) -> None:
         self.data_dir: str = data_dir
-        self.min_valid_year: int = min_valid_year
         self._offset: float = 0.0
-        self.quality: str = af.QUALITY_UNSYNCED
-        self.synced_at: Optional[float] = None
-        self._lock = threading.Lock()
         self._restore()
 
     def now(self) -> float:
         return time.time() + self._offset
 
     def _restore(self) -> None:
-        if self.is_ntp_synced():
-            self.quality = af.QUALITY_SYNCED
-            self.synced_at = time.time()
-            logger.info("Clock is NTP-synchronised at boot")
-            return
-
         kernel: float = time.time()
         saved: Optional[float] = self._read_last_known()
         if saved is not None and saved > kernel:
             # Restoring only ever moves the clock forward, so a recorded time
-            # can be behind reality but never ahead of it.
+            # can be behind reality but never ahead of it -- and never behind
+            # the recording before it.
             self._offset = saved - kernel
-            logger.info("Restored last known time (+{:.0f}s behind reality by at "
-                        "least the time spent powered off)", self._offset)
-
-        year: int = time.localtime(self.now()).tm_year
-        self.quality = af.QUALITY_INVALID if year < self.min_valid_year else af.QUALITY_UNSYNCED
-        if self.quality == af.QUALITY_INVALID:
-            logger.warning("Clock reads year {} (< {}); treating it as invalid",
-                           year, self.min_valid_year)
-
-    def is_ntp_synced(self) -> bool:
-        # The marker file is the cheapest check; timedatectl is the fallback for
-        # systems where timesyncd does not create it.
-        if os.path.exists(self._SYNC_MARKER):
-            return True
-        try:
-            out: str = subprocess.run(
-                ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
-                capture_output=True, text=True, timeout=5).stdout.strip()
-            return out.lower() == "yes"
-        except (OSError, subprocess.SubprocessError):
-            return False
-
-    def poll_sync(self) -> Optional[float]:
-        """Check for a fresh NTP sync. Returns the correction in seconds, or None.
-
-        Only the first unsynced -> synced transition matters; once the clock is
-        good, later NTP nudges are sub-second and are ignored.
-        """
-        with self._lock:
-            if self.quality in af.TRUSTED_QUALITIES:
-                return None
-            if not self.is_ntp_synced():
-                return None
-            correction: float = time.time() - self.now()
-            self._offset = 0.0
-            self.quality = af.QUALITY_SYNCED
-            self.synced_at = time.time()
-            logger.info("NTP acquired; clock moved {:+.2f}s", correction)
-            return correction
+            logger.info("Restored last known time (+{:.0f}s on the kernel clock)",
+                        self._offset)
 
     def save_last_known(self) -> None:
         path: str = os.path.join(self.data_dir, LAST_KNOWN)
@@ -320,7 +276,6 @@ class Status:
     pitch: Optional[float] = None
     temp_c: Optional[float] = None
     sensor_ok: bool = False
-    time_quality: str = af.QUALITY_UNSYNCED
     stability: dict[str, Any] = field(default_factory=dict)
     free_mb: float = 0.0
     error: Optional[str] = None
@@ -342,7 +297,7 @@ class Recorder:
         self._lock = threading.Lock()
         self.fail_on_no_sensor: bool = fail_on_no_sensor
 
-        self.time = TimeKeeper(data_dir, int(cfg["min_valid_year"]))
+        self.time = TimeKeeper(data_dir)
         self.sensor = SensorLink(port)
         self.monitor = stability.StabilityMonitor(
             stability.Limits.from_config({"recorder": cfg}))
@@ -358,7 +313,6 @@ class Recorder:
         self._record_start_mono: float = 0.0
         self._record_start_epoch: float = 0.0
         self._next_time_save: float = 0.0
-        self._next_ntp_check: float = 0.0
         self._since_judged: int = 0
         self._next_purge: float = 0.0
         self._next_ip_check: float = 0.0
@@ -417,7 +371,6 @@ class Recorder:
             self.status.device_serial = self.sensor.serial
             self.status.config_warnings = list(self.sensor.config_warnings)
             self.status.sensor_ok = self.sensor.device is not None
-            self.status.time_quality = self.time.quality
             self.status.free_mb = _free_mb(self.data_dir)
             if self._record_start_mono:
                 self.status.elapsed_s = time.monotonic() - self._record_start_mono
@@ -549,10 +502,6 @@ class Recorder:
 
     def _tick(self) -> None:
         now_mono: float = time.monotonic()
-
-        if now_mono >= self._next_ntp_check:
-            self._next_ntp_check = now_mono + float(self.cfg["ntp_retry_interval_seconds"])
-            self._on_ntp_poll()
 
         if now_mono >= self._next_time_save:
             self._next_time_save = now_mono + float(self.cfg["time_save_interval_seconds"])
@@ -719,8 +668,8 @@ class Recorder:
     def _start_recording(self) -> None:
         self._record_start_epoch = self.time.now()
         self._record_start_mono = time.monotonic()
-        name: str = af.build_filename(self._record_start_epoch, self.time.quality,
-                                      self.position, self.boot_count, partial=True)
+        name: str = af.build_filename(self.position, af.next_slot(self.data_dir),
+                                      partial=True)
         path: str = os.path.join(self.data_dir, name)
         header = af.Header(
             start_epoch=self._record_start_epoch,
@@ -736,7 +685,6 @@ class Recorder:
             logger.error("Cannot open {}: {}", name, exc)
             self.status.error = str(exc)
             return
-        self._write_timeinfo(path)
         self.status.file = name
         self.status.started_at = self._record_start_epoch
         self.status.samples = 0
@@ -785,78 +733,6 @@ class Recorder:
             self._start_recording()
 
     # -- time -------------------------------------------------------------
-
-    def _on_ntp_poll(self) -> None:
-        correction: Optional[float] = self.time.poll_sync()
-        if correction is None:
-            return
-        # The recording itself is untouched. Only the sidecar changes; the file
-        # gets its corrected name during the next boot's recovery (section 3).
-        if self.writer is not None:
-            self._record_start_epoch += correction
-            self._write_timeinfo(self.writer.path, correction)
-            logger.info("Recorded a {:+.2f}s correction for {}",
-                        correction, os.path.basename(self.writer.path))
-        self._retime_this_boot(correction)
-
-    def _retime_this_boot(self, correction: float) -> None:
-        """Re-time the recordings this boot has already finished.
-
-        They were named from the same wrong clock as the open one, and
-        monotonic time ran unbroken across all of them, so the correction that
-        just fixed the open file fixes those too. Without this a measurement
-        made out of range and stopped before the vehicle drove back into it
-        stayed 시각 미확인 for good: nothing else ever revisits a finalised
-        name, and the offset is known only while this boot lasts.
-
-        Files carried over from an earlier boot keep that boot's number and are
-        left alone -- their clock error was never measured.
-        """
-        try:
-            names: list[str] = os.listdir(self.data_dir)
-        except OSError as exc:
-            logger.error("Cannot re-time in {}: {}", self.data_dir, exc)
-            return
-        for name in sorted(names):
-            if not name.endswith(af.EXT):
-                continue
-            parsed: Optional[dict] = af.parse_filename(name)
-            if parsed is None or parsed["trusted"]:
-                continue
-            if int(parsed["boot_count"]) != self.boot_count:
-                continue
-            try:
-                final: Optional[str] = af.apply_correction(
-                    os.path.join(self.data_dir, name), correction)
-            except (OSError, af.FormatError) as exc:
-                logger.error("Could not re-time {}: {}", name, exc)
-                continue
-            if final is not None:
-                logger.info("Re-timed {} -> {} ({:+.2f}s)",
-                            name, os.path.basename(final), correction)
-
-    def _write_timeinfo(self, path: str, correction: float = 0.0) -> None:
-        info: dict[str, Any] = {
-            "device_start_epoch": self._record_start_epoch - correction,
-            "quality": self.time.quality,
-            "source": "ntp",
-            "boot_count": self.boot_count,
-            "original_filename": os.path.basename(path),
-        }
-        if correction:
-            info["corrected_start_epoch"] = self._record_start_epoch
-            info["offset_seconds"] = correction
-            info["applied_at_elapsed_ms"] = int(
-                (time.monotonic() - self._record_start_mono) * 1000.0)
-        elif self.time.quality in af.TRUSTED_QUALITIES:
-            # Trusted from the very start: record it so recovery can drop the
-            # .unsynced marker without needing a correction to have happened.
-            info["corrected_start_epoch"] = self._record_start_epoch
-            info["offset_seconds"] = 0.0
-        try:
-            af.write_timeinfo(path, info)
-        except OSError as exc:
-            logger.warning("Could not write .timeinfo: {}", exc)
 
     # -- housekeeping -----------------------------------------------------
 

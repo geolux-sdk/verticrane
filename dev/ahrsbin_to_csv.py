@@ -38,12 +38,9 @@ COLUMNS: tuple[str, ...] = (
 
 def convert(path: str, out_path: str) -> int:
     header: af.Header = af.read_header(path)
-    # The filename is the authority on when this started; the header holds only
-    # what the device believed at the time (section 5.2).
-    start_epoch, quality = af.effective_start(path)
-    if quality not in af.TRUSTED_QUALITIES:
-        logger.warning("{}: the start time is not trusted; timestamps are relative "
-                       "to a guess", os.path.basename(path))
+    # What the device believed when it opened the file, which is all anyone
+    # knows (section 5.2). The elapsed times added to it are exact.
+    start_epoch: float = header.start_epoch
 
     rows: int = 0
     with open(out_path, "w", newline="", encoding="utf-8") as f:
@@ -73,12 +70,13 @@ def convert(path: str, out_path: str) -> int:
 def describe(path: str) -> None:
     header: af.Header = af.read_header(path)
     summary: af.Summary = af.scan(path)
-    start, quality = af.effective_start(path)
+    start: float = header.start_epoch
     print("  {0}".format(os.path.basename(path)))
     print("    센서      : {0} [{1}]  {2}".format(
         header.sensor_id or "-", header.position_name, header.device_serial or "-"))
-    print("    시작      : {0}  ({1})".format(
-        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start)), quality))
+    print("    시작      : {0}{1}".format(
+        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start)),
+        "  (전원 차단 복구)" if header.recovered else ""))
     print("    블록/샘플 : {0} / {1}   {2:.1f} s @ {3} Hz".format(
         summary.blocks, summary.samples, summary.duration_s, header.sample_rate_hz))
     flagged: int = sum(1 for b in af.iter_blocks(path) if b.flags)

@@ -22,13 +22,6 @@
     센서
     {% if status.sensor_ok %}<span class="pill ok">연결됨</span>
     {% else %}<span class="pill bad">끊김</span>{% endif %}
-    &nbsp; 시각
-    {% if status.time_quality in ("synced", "rtc") %}
-      <span class="pill ok">{{ status.time_quality }}</span>
-    {% else %}
-      <span class="pill warn">{{ status.time_quality }}</span>
-      <span class="muted">— 아직 맞지 않았습니다. 네트워크가 있으면 곧 자동으로 맞춰집니다.</span>
-    {% endif %}
     {% if status.device_serial %}
       <br><span class="muted">센서 번호 {{ status.device_serial }}</span>
     {% endif %}
@@ -82,13 +75,11 @@
       <tr>
         <td>
           {# The name is what lands on the operator's laptop, and it already
-             carries the position and the corrected start time. #}
+             is the rotating slot, so the start time beside it is what tells
+             two recordings apart. #}
           <code style="font-size:13px">{{ f.name }}</code>
           <div class="small muted">
             {{ f.start }}
-            {% if not f.trusted_time %}
-              <span class="pill warn" title="기록할 때 시계가 맞지 않았습니다">시각 미확인</span>
-            {% endif %}
             {% if f.recovered %}<span class="muted">· 전원 차단 복구</span>{% endif %}
           </div>
         </td>

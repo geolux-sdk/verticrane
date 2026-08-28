@@ -10,17 +10,11 @@
   <h2>장비 시각</h2>
   <p style="margin:0">
     <b>{{ device_time }}</b>
-    {% if status.time_quality in ("synced", "rtc") %}
-      <span class="pill ok">{{ status.time_quality }}</span>
-      <span class="small muted">시각이 맞았습니다.</span>
-    {% else %}
-      <span class="pill warn">{{ status.time_quality }}</span>
-      <span class="small muted">
-        아직 맞지 않았습니다. 설정할 것은 없습니다 — 이 화면이 보인다는 것은
-        네트워크가 있다는 뜻이므로 곧 자동으로 맞춰집니다. 그때 기록 중인
-        파일의 이름도 정확한 시각으로 바로잡힙니다.
-      </span>
-    {% endif %}
+    <span class="small muted">
+      네트워크가 있으면 맞고, 없으면 마지막으로 알던 시각에서 이어집니다.
+      기록 파일에는 이 시각이 그대로 들어가며, <b>맞다고 주장하지는 않습니다</b> —
+      파일 안의 경과 시간은 어느 경우에도 정확합니다.
+    </span>
   </p>
 </div>
 {% endif %}
