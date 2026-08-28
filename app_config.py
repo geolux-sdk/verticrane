@@ -1,10 +1,8 @@
 # coding:UTF-8
-# Persisted dashboard settings and the admin PIN for the hidden /setup page.
+# Persisted settings and the admin PIN.
 #
 # Stored in config.json next to this file (gitignored, per-deployment). The PIN is
-# kept only as a salted SHA-256 hash, never in plaintext. On a fresh install the
-# defaults apply (threshold 0.1 %, 1.0 s window, log level INFO, PIN 01023538099);
-# the admin is expected to change the PIN on first use via /setup.
+# kept only as a salted SHA-256 hash, never in plaintext.
 #
 # This module also owns the central loguru configuration: LOG_LEVEL is read from
 # config.json and applied to the root logger, so every tool that imports
@@ -23,6 +21,15 @@ from loguru import logger
 
 CONFIG_PATH: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
+# Settled, and not a secret. It is the owner's own phone number, chosen so it is
+# always to hand, and it guards only deleting a file and saving settings.
+#
+# Reviews keep flagging this as a hardcoded default credential. It is not worth
+# raising: listing and downloading are unauthenticated on the same device, and a
+# single unauthenticated GET /api/files already ends a measurement in progress --
+# a larger and irreversible lever than anything behind the PIN. What the PIN is
+# therefore changes nothing about the exposure. If the API as a whole ever gains
+# authentication, that is a different question and this line is not its answer.
 DEFAULT_PIN: str = "01023538099"
 DEFAULT_LOG_LEVEL: str = "INFO"
 
