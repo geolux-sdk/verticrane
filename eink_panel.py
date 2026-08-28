@@ -298,24 +298,27 @@ def _title(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
 def _body_install(d: ImageDraw.ImageDraw, contact_face: str) -> None:
     """Being fitted. Nothing to read yet -- only which way it goes on.
 
-    This is what the panel shows from the moment the power comes on, because
-    that is when the operator is carrying it up the crane to mount it.
+    This is what the panel shows once the boot frame clears, because that is
+    when the operator is carrying it up the crane to mount it.
+
+    The scale is set by where the caption lands, not by how large the diagram
+    could be: at 1.45 it pushed 접촉면 to within a few pixels of the footer
+    rule, which read as a mistake next to every other screen.
     """
-    draw_orientation(d, 22, TITLE_H + 4, contact_face, scale=1.45)
+    draw_orientation(d, 27, TITLE_H + 4, contact_face, scale=1.20)
 
 
 def _body_recording(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     """Recording has started, and that is the entire message.
 
-    Reading this from the ground is the point, so it is one word at the size
-    the panel can manage. The elapsed time underneath is what separates a live
-    frame from one left behind by a power cut.
+    Reading this from a step back is the point, so it is one word at the size
+    the panel can manage and nothing else. An elapsed time sat here at first,
+    but this frame only stands for fifteen seconds -- it never read anything
+    but zero, which is worse than leaving the space empty.
     """
     label, korean = _label("기록 중", "RECORDING")
-    d.rectangle([0, TITLE_H + 6, WIDTH - 1, TITLE_H + 58], fill=0)
-    _centre(d, TITLE_H + 11, label,
-            _fit(d, label, WIDTH - 16, 38, bold=True, korean=korean), 255)
-    _centre(d, TITLE_H + 74, _hms(status.get("elapsed_s", 0)), _font(34, bold=True), 0)
+    d.rectangle([0, 66, WIDTH - 1, 128], fill=0)
+    _centre(d, 73, label, _fit(d, label, WIDTH - 20, 46, bold=True, korean=korean), 255)
 
 
 def _body_measure(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
