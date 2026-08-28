@@ -11,6 +11,11 @@ Type=simple
 User=root
 WorkingDirectory=/home/pi/verticrane/bt
 Environment=PYTHONUNBUFFERED=1
+# 광고를 여는 시간(초). 이 창이 닫히면 전원을 껐다 켜야 다시 열린다.
+# 이 채널에는 페어링도 암호화도 없어, 상시로 두면 근처의 누구나 Wi-Fi 설정을
+# 바꿔 장비를 못 쓰게 만들 수 있다(bt/README.md '보안 주의').
+# 현장에서 3분이 빠듯하면 늘리고, 0 이면 제한 없음(예전 동작).
+Environment=VERTICRANE_BLE_WINDOW_S=180
 
 # 부팅 직후 어댑터가 soft block 되어 있으면 광고 등록이 실패한다.
 # 실패해도 기동은 계속하도록 '-' 를 붙였다(이미 unblock 이면 그대로 성공).

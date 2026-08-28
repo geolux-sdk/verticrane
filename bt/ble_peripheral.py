@@ -84,6 +84,19 @@ STATUS_REFRESH_S = 15
 # 채로 남는다 — 그러면 아무도 이 장비를 찾지 못한다. 그래서 직접 끊고
 # 광고를 다시 올린다.
 RX_TIMEOUT_S = 5.0
+
+# 광고를 여는 시간. 이 창이 닫히면 아무도 장비를 찾을 수 없고, 다시 열려면
+# 전원을 껐다 켜야 한다.
+#
+# 상시로 두지 않는 이유: 이 채널에는 페어링도 암호화도 없다. 근처의 누구나 Wi-Fi
+# 설정을 바꿔 **장비를 존재하지 않는 망으로 옮겨버릴 수 있고**, 그러면 화면도
+# 키보드도 없는 크레인 위 장비에서 데이터를 가져올 방법이 사라진다. 되돌릴 유일한
+# 경로가 방금 공격에 쓰인 그 BLE다.
+#
+# README 는 원래 "설정 시점에만 쓰는 채널이라 위험 노출 시간은 짧다"고 적었는데,
+# 서비스가 systemd 로 상시 기동되어 사실이 아니었다. 이 창이 그 문장을 사실로
+# 만든다.
+ADV_WINDOW_S = float(os.environ.get("VERTICRANE_BLE_WINDOW_S", "180"))
 RX_WATCHDOG_S = 1
 # 연결 직후에는 호스트가 아직 아무것도 못 보낸다 — 서비스 검색과 알림 구독을
 # 끝내야 첫 keepalive 를 보낼 수 있고, 그 준비가 5초를 넘길 때가 있다(특히 GATT
@@ -94,6 +107,8 @@ CONNECT_GRACE_S = 20.0
 _state = {
     "tx_char": None,     # 알림을 보낼 TX Characteristic 객체
     "notifying": False,  # 호스트가 TX 구독(subscribe) 중인지 여부
+    "window_ends": 0.0,  # 이 시각이 지나면 광고를 내린다 (monotonic)
+    "window_shut": False,  # 이미 내렸다 — 로그를 한 번만 남기려고
     "beat": 0,           # 하트비트 카운터
     "device": None,      # 현재 연결된 호스트(bluezero Device) — 없으면 None
     "last_rx": 0.0,      # 마지막 수신 시각(monotonic). 0 이면 호스트 없음
@@ -340,6 +355,17 @@ def _rx_watchdog():
     등록이 한 번 실패해도 다음 초에 저절로 복구된다.
     """
     if not _state["last_rx"]:            # 붙어 있는 호스트가 없다
+        # 창은 여기서만 닫는다. 호스트가 붙어 있는 동안은 이 분기에 오지 않으므로,
+        # 설정 중에 3분이 지났다고 링크가 끊기는 일은 없다. 그 사람이 끝내고
+        # 나간 뒤에 닫힌다.
+        if ADV_WINDOW_S > 0 and time.monotonic() > _state["window_ends"]:
+            if not _state["window_shut"]:
+                _state["window_shut"] = True
+                _state["adv_dirty"] = False
+                _stop_advertising()
+                print(f"[ADV] 광고 창({ADV_WINDOW_S:.0f}초)이 닫혔습니다. "
+                      "다시 열려면 전원을 껐다 켜세요.")
+            return True
         if _state["adv_dirty"]:
             _restart_advertising()
         return True
@@ -606,6 +632,14 @@ def main():
     GLib.timeout_add(HEARTBEAT_MS, _heartbeat)
     GLib.timeout_add_seconds(STATUS_REFRESH_S, _auto_status)
     # 초 단위 타이머는 커널이 다른 깨어남과 묶어 처리한다(저전력 Pi 라 이득).
+    # 광고 창은 여기서 시작한다 — 어댑터가 준비되고 광고가 실제로 올라간 시점이라,
+    # 사용자가 장비를 찾을 수 있게 된 순간과 창의 시작이 같다.
+    _state["window_ends"] = time.monotonic() + ADV_WINDOW_S
+    if ADV_WINDOW_S > 0:
+        print(f"[ADV] {ADV_WINDOW_S:.0f}초 동안 광고합니다. "
+              "그 뒤에는 전원을 껐다 켜야 다시 열립니다.")
+    else:
+        print("[ADV] 광고 창 제한 없음 (VERTICRANE_BLE_WINDOW_S=0)")
     GLib.timeout_add_seconds(RX_WATCHDOG_S, _rx_watchdog)
 
     # --- publish() 분해 ---
