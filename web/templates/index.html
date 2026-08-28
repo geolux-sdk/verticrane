@@ -60,6 +60,7 @@
     {% endif %}
     <a class="btn" href="{{ url_for('index') }}" style="margin-left:6px">새로 고침</a>
   </p>
+  <p id="pending" class="small muted" style="margin:10px 0 0; display:none"></p>
   {% else %}
     <p class="muted">기록기가 연결되어 있지 않습니다.</p>
   {% endif %}
@@ -143,11 +144,45 @@ function collected(name, group) {
     .catch(function () {});
 }
 
+// Starting and stopping are requests, not commands: the recorder waits for the
+// sensor to settle before it opens a file, so reloading straight away showed
+// the state from before the button was pressed. Say what was asked for, and
+// let the poller below redraw the page when it has actually happened.
 function post(url) {
   fetch(url, {method: 'POST'})
     .then(function (r) { return r.json().catch(function () { return {}; }); })
-    .then(function () { location.reload(); })
+    .then(function (r) {
+      pending(r && r.ok === false
+              ? '지금은 처리할 수 없는 요청입니다.'
+              : '요청했습니다. 센서가 안정되면 시작합니다…');
+    })
     .catch(function (e) { alert('실패했습니다: ' + e.message); });
 }
+
+function pending(msg) {
+  var el = document.getElementById('pending');
+  if (!el) { return; }
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+{% if status %}
+// The page keeps itself current, so nobody has to reload to find out whether a
+// recording started. It asks with ?auto=1, which the recorder does not read as
+// someone arriving -- a plain reload while a measurement runs is a visit, and
+// visits suppress auto-recording. That is also why the redraw goes to /?auto=1
+// rather than location.reload().
+(function () {
+  var shown = {{ status.state|tojson }};
+  setInterval(function () {
+    fetch('/api/status?auto=1', {cache: 'no-store'})
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.state && s.state !== shown) { location.replace('/?auto=1'); }
+      })
+      .catch(function () {});      // the WiFi drops as the vehicle moves off
+  }, 2000);
+})();
+{% endif %}
 </script>
 {% endblock %}

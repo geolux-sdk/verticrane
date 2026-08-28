@@ -364,6 +364,7 @@ class Recorder:
         self._next_purge: float = 0.0
         self._next_ip_check: float = 0.0
         self._panel_ip: Optional[str] = None
+        self._manual: bool = False
         self.panel: Optional[Any] = None
         self._unstable_since: float = 0.0
         self._last_temp_at: float = 0.0
@@ -386,6 +387,11 @@ class Recorder:
         what belongs in the operator's list, and it should not be the kind of
         judgement that destroys data if it is wrong.
 
+        None of that applies to a recording the operator started from the page.
+        The reasoning above rests on the recording having begun because nobody
+        was there; when someone pressed the button, they were. Loading the page
+        to watch a measurement they asked for must not destroy it.
+
         The status page's own polling is exempt (it carries ?auto=1), or a
         browser left open in the vehicle would throw away a real measurement the
         moment the WiFi came back into range.
@@ -393,7 +399,7 @@ class Recorder:
         if not self._http_seen.is_set():
             logger.info("HTTP request seen; auto-recording is suppressed")
         self._http_seen.set()
-        if self.state == RECORDING:
+        if self.state == RECORDING and not self._manual:
             logger.info("Operator connected while recording; discarding this recording")
             self._want_discard.set()
 
@@ -592,6 +598,9 @@ class Recorder:
             if self.state not in (RECORDING, WAITING_STABLE):
                 logger.info("Start requested from the web")
                 self.monitor.reset()
+                # Marks the recording as asked for, which is what stops the
+                # operator's own page loads from throwing it away.
+                self._manual = True
                 self._set_state(WAITING_STABLE)
 
         if self.state == MAINTENANCE:
@@ -772,6 +781,7 @@ class Recorder:
         except OSError as exc:
             logger.error("Error closing {}: {}", os.path.basename(path), exc)
         self.writer = None
+        self._manual = False
         logger.info("Stopped recording {} ({} blocks, {} samples)",
                     os.path.basename(path), self.status.blocks, self.status.samples)
         # Same finalising logic the next boot would have run, but this file was
