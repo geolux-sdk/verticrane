@@ -172,6 +172,33 @@ if [ "${relogin_needed}" -eq 1 ]; then
 fi
 
 # --------------------------------------------------------------------------
+say "부팅 시간"
+
+# cloud-init configures a machine on its first boot from a provider's metadata
+# -- account, hostname, initial WiFi. The Pi Imager leaves a seed in
+# /boot/firmware and cloud-init consumes it once. On every boot after that it
+# re-reads the same seed, runs its ~144 modules, finds nothing new to do, and
+# costs five to six seconds.
+#
+# Those seconds are not free here. The panel cannot draw until the recorder
+# runs, so until then the e-paper still shows the frame from the last power
+# cut and a running device looks exactly like a dead one.
+#
+# Safe to switch off at this point: the account, the hostname and the WiFi
+# profiles are already on disk, and the profiles belong to NetworkManager
+# (/etc/NetworkManager/system-connections/), which rewrites them on its own.
+# Re-flashing the card starts from a fresh image where this file does not
+# exist, so first-boot provisioning still happens.
+if [ ! -d /etc/cloud ]; then
+    ok "cloud-init 없음"
+elif [ -e /etc/cloud/cloud-init.disabled ]; then
+    ok "cloud-init 꺼짐"
+else
+    act "cloud-init 끄기 (부팅 5~6초 단축, 되돌리려면 이 파일을 지우세요)"
+    run sudo touch /etc/cloud/cloud-init.disabled
+fi
+
+# --------------------------------------------------------------------------
 say "파이썬 환경"
 
 if [ "${DRY}" -eq 1 ]; then
