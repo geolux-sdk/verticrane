@@ -22,7 +22,7 @@ can run while it does.
 | File | Role |
 |---|---|
 | `recorder.py` | Recording loop and the four-state boot sequence (§3) |
-| `ahrs_file.py` | `.ahrsbin` format: header, blocks, recovery, merge (§5) |
+| `ahrs_file.py` | `.dat` format: header, blocks, slot names, recovery, merge (§5) |
 | `stability.py` | Decides when recording may begin (§4) |
 | `filestore.py` | File listing, continuity groups, trash (§5.4, §7) |
 | `web/` | Operator interface, Flask on 8080 (§7, §8) |
@@ -34,7 +34,7 @@ can run while it does.
 | `gdey0154d67.py` | e-paper driver (SSD1681) |
 
 **Developer tools (`dev/`)** — Streamlit dashboard, CSV analysis, sensor
-configuration, panel test tools, `.ahrsbin` → CSV conversion, and `devmode.sh`,
+configuration, panel test tools, `.dat` → CSV conversion, and `devmode.sh`,
 which stops the recorder, runs a command, and restarts it from a trap.
 
 `dev/` scripts sit one level down, so each puts the repo root on `sys.path` in two
@@ -59,26 +59,42 @@ explicit lines before importing runtime modules.
 
 ## Things that are easy to get wrong here
 
-- **Never rename a file while it is being written.** The timestamp is fixed up
-  during the next boot's recovery pass; in the field the power simply drops and
-  there is no shutdown to hook (§3, §6).
+- **Nothing renames a recording, ever.** The name is a rotating slot number and
+  says nothing that could later turn out to be wrong; what the recording is lives
+  in the header. Putting a fact in a name means rewriting the name when the fact
+  changes, and every reader has to agree on the spelling -- one disagreement over
+  suffix order once left an intact recording on the card and nothing in the
+  operator's list (§5.1).
+- **The device does not grade its own clock.** The header records what it believed
+  when the file opened and claims nothing further. There is no time quality, no
+  .unsynced, no sidecar, no retroactive correction, and no NTP watch; they were
+  removed because a device cannot check the clock it is grading (§3). The header
+  timestamp is still sound for *ordering* -- one card, one clock, so differences
+  hold -- which is why the list and the continuity grouping use it.
 - **Never let a missing panel, absent Flask, or a dropped serial link stop the
   recording.** A device that quietly stopped recording is the worst outcome in
   this project.
 - **`close()` does not reach the disk; `fsync()` does.** See §6 before changing
   anything about how blocks are written.
-- The e-paper refreshes once a minute and no faster — it is rated in refresh
-  count and would be worn out in about two weeks at 1 Hz (§9).
+- **The panel is drawn on events, not on a timer.** The thread blocks on an
+  event with no timeout; whoever changes something calls `refresh_now()`. Only
+  the measurement screen also repeats, because its number tracks the crane. The
+  panel is rated in refresh count and would be worn out in about two weeks at
+  1 Hz (§9).
+- **Nothing starts a recording from the web.** Reaching the page is the condition
+  that suppresses auto-recording and discards one in progress, so a start button
+  asked for the thing the asker's presence denies (§3).
 
 ## Validation
 
 No hardware needed:
 
 ```bash
-python test_ahrs_file.py     # format: write, tear, recover, merge, filenames
+python test_ahrs_file.py     # format: write, tear, recover, merge, slot names
+python test_eink_panel.py    # panel: state -> screen, wake scheduling, frames
 python test_stability.py     # judge: 0/360 seam, window, motion rejection
 python stability.py data/*.csv   # replay recorded logs against the limits
-python eink_panel.py --out panel.png --scale 3
+python eink_panel.py --out panel.png --scale 3 --screen boot
 ```
 
 On the Pi (`./test.sh` runs all of it, sensor included). The device is at

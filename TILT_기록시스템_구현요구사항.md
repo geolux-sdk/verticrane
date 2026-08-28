@@ -528,8 +528,7 @@ FLAG_NNN.dat
 | `GET /api/files/{filename}` | 단일 파일 다운로드 |
 | `GET /api/groups/{group_id}` | 연속 그룹 전체를 병합한 단일 `.dat` 다운로드 |
 | `DELETE /api/files/{filename}` | 파일 삭제 (PIN 필요) |
-| `POST /api/record/start` | `maintenance` 상태에서 수동 기록 시작 |
-| `POST /api/record/stop` | 기록 중지 및 파일 확정 |
+| `POST /api/record/stop` | 기록 중지 및 파일 확정. **시작하는 API는 없다**(§3) |
 | `POST /api/files/{filename}/collected` | 받았음을 확인. 이 요청이 휴지통 이동을 일으킨다 |
 | `POST /api/groups/{group_id}/collected` | 그룹 전체를 받았음을 확인 |
 | `GET /settings` | 설정 조회·수정 화면 |
@@ -539,10 +538,9 @@ FLAG_NNN.dat
 `FLAG_NNN.dat` 정규식에 정확히 맞는 것만
 받는다. 검증 후에도 실제 열기 전에 `data/` 하위인지 `realpath`로 다시 확인한다.
 
-**시각 규칙**: `/api/files`와 `/api/status`가 돌려주는 시각은 시각 보정 블록을
-적용한 **보정 후 값**이다. 보정 여부와 원래 값도 함께 실어, 운영자가 "이 시각이
-나중에 고쳐진 것"임을 알 수 있게 한다. 파일명은 슬롯 번호이므로 시각을 답하지
-않는다 — 목록의 시각 열이 유일한 답이다.
+**시각 규칙**: `/api/files`와 `/api/status`가 돌려주는 시각은 **헤더에 적힌 값
+그대로**다. 고쳐지는 일이 없으므로 "보정 전/후"도 없다(§3). 파일명은 슬롯 번호이므로
+시각을 답하지 않는다 — 목록의 시각 열이 유일한 답이다.
 
 다운로드 응답의 `Content-Disposition`에는 **디스크에 있는 이름을 그대로** 싣는다.
 슬롯 번호가 장비마다 같은 값을 돌지만 FLAG가 앞에 있고, 장비를 가르는 것은
@@ -837,11 +835,10 @@ Z가 위를 가리킨다 — 그림과 실제 축이 맞는다.
 | `stop_on_unstable` | false | 불안정 지속 시 기록 중단 여부 |
 | `record_fsync_interval_seconds` | 1 | 강제 동기화 주기. 블록마다 동기화하므로 사실상 블록 주기 |
 | `merge_gap_tolerance_seconds` | 2 | 연속 파일 판정 허용 간격 |
-| `ntp_retry_interval_seconds` | 30 | 백그라운드 NTP 동기화 확인 주기 |
-| `time_save_interval_seconds` | 10 | 마지막으로 알던 시각 저장 주기 |
-| `min_valid_year` | 2026 | 이보다 이전이면 시각을 `invalid`로 판정 |
+| `time_save_interval_seconds` | 10 | 마지막으로 알던 시각 저장 주기. 시계가 뒤로 가지 않게 하는 용도다(§3) |
+| `ip_check_interval_seconds` | 10 | 주소가 바뀌었는지 보는 주기. 바뀌었을 때만 패널을 깨운다(§9) |
 | `contact_face` | `bottom` | 구조물에 닿는 면. 기구가 정하는 값이다 |
-| `panel_refresh_seconds` | 60 | e-paper 갱신 주기. **초 단위로 낮추지 말 것**(§9) |
+| `panel_refresh_seconds` | 60 | **측정 화면만** 이 주기로 갱신한다. 나머지는 이벤트로만 그린다. **초 단위로 낮추지 말 것**(§9) |
 | `panel_rotation` | 90 | 패널이 기구에 돌아간 채 붙으므로 완성된 화면을 시계방향으로 돌린다 |
 | `http_port` | 8080 | 웹 포트 |
 
@@ -882,9 +879,9 @@ Z가 위를 가리킨다 — 그림과 실제 축이 맞는다.
 
 - 로깅은 기존 loguru 설정(`app_config.setup_logging()`)을 그대로 쓴다. 기록할 이벤트:
   부팅, HTTP 접속 감지, 상태 전환, 안정화 판정 결과, 기록 시작·종료, 파일 복구 결과,
-  시리얼 오류·재연결, 설정 변경, 센서 설정 확인 결과, **시각 동기화 결과와 기록 중 시각 보정**.
-- 시각이 보정되면 보정 전후 값과 차이를 그대로 남긴다. 나중에 파일이 왜 나뉘었는지
-  설명할 수 있는 유일한 근거다.
+  시리얼 오류·재연결, 설정 변경, 센서 설정 확인 결과, 슬롯 번호 부여.
+- **부팅 시 복원한 시각과 그 보정폭을 남긴다.** 시계가 얼마나 뒤처진 채로 기록이
+  시작됐는지를 나중에 설명할 수 있는 유일한 근거다(§3).
 - 디스크 여유 공간을 주기적으로 확인한다. `min_free_mb` 미만이면 **먼저 휴지통을
   오래된 것부터 비우고**(§7), 그래도 모자라면 경고 후 기록을 중지한다. SD 카드가
   가득 찬 상태로 계속 쓰면 파일시스템이 깨진다.
@@ -979,6 +976,7 @@ sudo systemctl start verticrane-recorder    # 끝나면 되돌리기
 ```bash
 python test_ahrs_file.py     # 쓰기 → 중간에 자르기 → 복구 → 복구 표식 → 병합 → 슬롯 이름
 python test_stability.py     # 0/360 경계, 윈도우 경계, 움직임 거부
+python test_eink_panel.py    # 상태→화면, 다음 갱신 예약, 다섯 화면 렌더링
 python stability.py data/*.csv   # 기록된 로그로 기준값 재검증
 ```
 
@@ -989,10 +987,10 @@ python stability.py data/*.csv   # 기록된 로그로 기준값 재검증
 | §3 접속 없으면 자동 기록 | 인자 없이 띄우고 60초 건드리지 않는다 → `recording`으로 간다 |
 | §3 접속하면 대기 | 60초 안에 `/api/status`를 부른다 → `maintenance`에 머문다 |
 | §4 안정화 판정 | 기록 중 흔들어 본다 → 로그에 사유가 남고 블록에 플래그가 붙는다 |
-| §6 **전원 차단 복구** | 기록 중 전원을 뽑는다 → 다음 부팅에서 `.recovered`로 확정된다 |
+| §6 **전원 차단 복구** | 기록 중 전원을 뽑는다 → 다음 부팅에서 `.partial`이 떨어지고 헤더에 복구 표식이 붙는다 |
 | §7 다운로드 중단 | 전송을 끊는다 → 파일이 목록에 그대로 남는다 |
 | §7 경로 검증 | `/api/files/../../etc/passwd` → 404 |
-| §9 패널 | `eink_panel.py --out panel.png`로 하드웨어 없이도 미리 본다 |
+| §9 패널 | `eink_panel.py --out panel.png --screen boot`로 하드웨어 없이 화면별로 미리 본다 |
 
 §6은 **직접 전원을 뽑아서** 확인한다. 정상 종료로는 그 경로를 타지 않는다.
 

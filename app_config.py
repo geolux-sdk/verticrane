@@ -38,9 +38,7 @@ RECORDER_DEFAULTS: dict[str, Any] = {
     "mount_delay_seconds": 60,
     "network_wait_seconds": 90,            # once associated, how long to wait for DHCP
     "http_wait_seconds": 60,               # window after the address lands, network only
-    "ntp_retry_interval_seconds": 30,      # how often the background watcher re-checks NTP
     "time_save_interval_seconds": 10,      # how often the last known time is persisted
-    "min_valid_year": 2026,                # below this the clock is not even plausible
     "stability_window_seconds": 5.0,
     "stability_min_samples": 100,
     "gyro_rms_max_dps": 0.5,
