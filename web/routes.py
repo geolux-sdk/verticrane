@@ -258,25 +258,73 @@ def _send(paths: list[str], display_name: str,
     is not something this side can observe. The client says so instead.
     """
     total: int = sum(os.path.getsize(p) for p in paths)
+    start, end = _wanted_range(total)
+    partial: bool = (start, end) != (0, total - 1)
 
     def generate() -> Iterator[bytes]:
         try:
+            offset: int = 0            # where this file begins in the whole body
             for path in paths:
+                size: int = os.path.getsize(path)
+                if offset + size <= start:
+                    offset += size     # entirely before the requested range
+                    continue
+                if offset > end:
+                    break
                 with open(path, "rb") as f:
-                    while True:
-                        chunk: bytes = f.read(CHUNK)
+                    if start > offset:
+                        f.seek(start - offset)
+                    remaining: int = min(end, offset + size - 1) - max(start, offset) + 1
+                    while remaining > 0:
+                        chunk: bytes = f.read(min(CHUNK, remaining))
                         if not chunk:
                             break
+                        remaining -= len(chunk)
                         yield chunk
+                offset += size
         finally:
             if cleanup and os.path.exists(cleanup):
                 os.unlink(cleanup)
 
     response = Response(stream_with_context(generate()),
+                        status=206 if partial else 200,
                         mimetype="application/octet-stream")
-    response.headers["Content-Length"] = str(total)
+    response.headers["Content-Length"] = str(end - start + 1)
+    response.headers["Accept-Ranges"] = "bytes"
+    if partial:
+        response.headers["Content-Range"] = "bytes {0}-{1}/{2}".format(start, end, total)
     response.headers["Content-Disposition"] = 'attachment; filename="{0}"'.format(display_name)
     return response
+
+
+def _wanted_range(total: int) -> tuple[int, int]:
+    """The byte range the client asked for, clamped to what exists.
+
+    Whole-body on anything unparseable rather than a 416. The vehicle's WiFi
+    drops as it moves off (section 1), so a transfer that got most of the way
+    and has to start again is the normal case here, not an edge one -- and a
+    client that asks awkwardly should still get its file.
+
+    Only the single `bytes=N-M` form is honoured. Multipart ranges would mean a
+    multipart body for no gain: nobody here wants two pieces of a recording.
+    """
+    header: str = request.headers.get("Range", "")
+    if not header.startswith("bytes=") or "," in header:
+        return 0, total - 1
+    spec: str = header[len("bytes="):].strip()
+    try:
+        if spec.startswith("-"):                       # last N bytes
+            start, end = max(total - int(spec[1:]), 0), total - 1
+        else:
+            first, _, last = spec.partition("-")
+            start = int(first)
+            end = int(last) if last else total - 1
+    except ValueError:
+        return 0, total - 1
+    end = min(end, total - 1)
+    if start > end or start < 0:
+        return 0, total - 1
+    return start, end
 
 
 # --------------------------------------------------------------------------

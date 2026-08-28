@@ -51,31 +51,57 @@ def _human(n: float) -> str:
     return ""
 
 
-def download(base: str, name: str, dest: str) -> int:
-    """Stream one recording to disk. Returns the bytes written.
+def download(base: str, name: str, dest: str, expect: int,
+             attempts: int = 4) -> int:
+    """Stream one recording to disk, resuming where it left off.
 
-    Written to a .part and renamed only once the whole body has arrived and
+    Written to a .part and renamed only once the whole file has arrived and
     reached the disk. An interrupted transfer therefore leaves nothing that
     looks like a finished file, which matters because the next thing this
-    script does is tell the device it may retire the original.
+    script does is tell the device it may retire the original -- and the .part
+    that is left is exactly what the next attempt continues from.
+
+    Resuming is not a refinement here. The vehicle's WiFi drops as it moves
+    off, so losing a transfer most of the way through a 100 MB file is the
+    normal case, and starting again from zero can mean never finishing.
     """
     tmp = dest + ".part"
     url = base + "/api/files/" + urllib.parse.quote(name)
-    written = 0
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
-        declared = int(r.headers.get("Content-Length") or 0)
-        with open(tmp, "wb") as f:
-            while True:
-                chunk = r.read(CHUNK)
-                if not chunk:
-                    break
-                f.write(chunk)
-                written += len(chunk)
-            f.flush()
-            os.fsync(f.fileno())
-    if declared and written != declared:
-        os.unlink(tmp)
-        raise IOError("{0}: got {1} of {2} bytes".format(name, written, declared))
+
+    for attempt in range(attempts):
+        have = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+        if have >= expect > 0:
+            break
+        req = urllib.request.Request(url)
+        if have:
+            req.add_header("Range", "bytes={0}-".format(have))
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                # A device that ignored the Range gives 200 and the whole body;
+                # start over rather than append it onto what is already there.
+                if have and r.status != 206:
+                    have = 0
+                mode = "r+b" if have else "wb"
+                with open(tmp, mode) as f:
+                    if have:
+                        f.seek(have)
+                    while True:
+                        chunk = r.read(CHUNK)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                    f.flush()
+                    os.fsync(f.fileno())
+        except (urllib.error.URLError, OSError) as exc:
+            if attempt == attempts - 1:
+                raise IOError("{0}: {1}".format(name, exc))
+            print("       … 끊겼습니다. 이어받습니다 ({0}/{1})".format(
+                attempt + 2, attempts))
+            continue
+
+    written = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+    if expect and written != expect:
+        raise IOError("{0}: got {1} of {2} bytes".format(name, written, expect))
     os.replace(tmp, dest)
     return written
 
@@ -119,7 +145,7 @@ def collect(host: str, out_dir: str, keep: bool) -> tuple[int, int, int]:
             continue
         try:
             started = time.monotonic()
-            size = download(base, name, dest)
+            size = download(base, name, dest, info["size"])
             took = max(time.monotonic() - started, 0.001)
         except (urllib.error.URLError, OSError, ValueError) as exc:
             print("     X {0:<16} {1}".format(name, exc))
