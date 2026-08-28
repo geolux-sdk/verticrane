@@ -115,6 +115,19 @@ def save(cfg: dict[str, Any]) -> None:
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, CONFIG_PATH)
+    # The rename is not durable until the directory entry itself is flushed --
+    # the same step ahrs_file takes after finalising a recording. Without it a
+    # power cut moments after saving can leave the old settings in place, and
+    # the operator who just set the install position would never know it did
+    # not take.
+    try:
+        fd: int = os.open(os.path.dirname(os.path.abspath(CONFIG_PATH)), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass                        # not every filesystem allows it; the replace stands
 
 
 def verify_pin(cfg: dict[str, Any], pin: str) -> bool:
