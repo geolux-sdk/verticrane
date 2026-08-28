@@ -16,7 +16,8 @@
       "Bash(python test_eink_panel.py)",
       "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && echo RESTARTED')",
       "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && sleep 8 && curl -s \"http://127.0.0.1:8080/?auto=1\" | grep -cE \"downloading|api/status\" && echo OK')",
-      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && sleep 10 && echo \"--- start API ---\" && curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST http://127.0.0.1:8080/api/record/start && echo \"--- 페이지에 기록시작 버튼 ---\" && curl -s \"http://127.0.0.1:8080/?auto=1\" | grep -c \"기록 시작\"')"
+      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && sudo systemctl restart verticrane-recorder && sleep 10 && echo \"--- start API ---\" && curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST http://127.0.0.1:8080/api/record/start && echo \"--- 페이지에 기록시작 버튼 ---\" && curl -s \"http://127.0.0.1:8080/?auto=1\" | grep -c \"기록 시작\"')",
+      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1 | tail -2 && .venv/bin/python test_ahrs_file.py 2>&1 | tail -2')"
     ]
   }
 }

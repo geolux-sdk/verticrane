@@ -589,6 +589,58 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
     return final_path
 
 
+def apply_correction(path: str, offset_seconds: float) -> Optional[str]:
+    """Re-time a finalised recording once the clock turns out to be known.
+
+    Returns the new path, or None if the name says the time was already
+    trusted and there is nothing to correct.
+
+    Only ever right for files written in the boot that just learned the
+    offset: monotonic time ran unbroken across them, so the one correction
+    fits them all. A file carried over from an earlier boot must be left
+    alone -- fake-hwclock restores a value nobody measured, so its error was
+    never known, and a trusted-looking name on a guessed time is worse than
+    an honest .unsynced one.
+
+    The rename lands before the sidecar is rewritten. Interrupted in between,
+    the file still reads correctly: effective_start() takes the filename over
+    the sidecar, so the name that just became true wins over the note that has
+    not caught up.
+    """
+    parsed: Optional[dict] = parse_filename(path)
+    if parsed is None:
+        raise FormatError("not a recording name: {0}".format(os.path.basename(path)))
+    if parsed["trusted"]:
+        return None
+
+    directory: str = os.path.dirname(os.path.abspath(path))
+    corrected: float = float(parsed["start_epoch"]) + offset_seconds
+    final_name: str = build_filename(corrected, QUALITY_SYNCED,
+                                     int(parsed["position"]),
+                                     int(parsed["boot_count"]),
+                                     recovered=bool(parsed["recovered"]))
+    final_path: str = _unique_path(os.path.join(directory, final_name))
+
+    os.replace(path, final_path)
+    old_sidecar: str = timeinfo_path(path)
+    if os.path.exists(old_sidecar):
+        os.replace(old_sidecar, timeinfo_path(final_path))
+
+    info: dict = read_timeinfo(final_path) or {}
+    info.update({
+        "device_start_epoch": info.get("device_start_epoch", parsed["start_epoch"]),
+        "corrected_start_epoch": corrected,
+        "offset_seconds": float(info.get("offset_seconds", 0.0)) + offset_seconds,
+        "quality": QUALITY_SYNCED,
+        "source": "ntp",
+        "boot_count": parsed["boot_count"],
+        "original_filename": info.get("original_filename", os.path.basename(path)),
+    })
+    write_timeinfo(final_path, info)
+    _fsync_dir(directory)
+    return final_path
+
+
 def _unique_path(path: str) -> str:
     # Two recordings can land on the same name when the clock is untrusted and
     # the boot counter did not advance. Never overwrite an existing recording:

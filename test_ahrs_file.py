@@ -275,8 +275,67 @@ def test_filenames() -> None:
         check("rejects {0!r}".format(bad), af.parse_filename(bad) is None)
 
 
+def test_apply_correction(tmp: str) -> None:
+    """A file finished before the clock was known still gets its real time.
+
+    The field case: record out of range, stop, drive back into range. Nothing
+    revisits a finalised name on its own, so without this the recording stayed
+    untrusted for good even though the offset was measured minutes later.
+    """
+    print("\n[8] 뒤늦은 시각 보정")
+    device_start: float = time.mktime(time.strptime("20260828_090000", "%Y%m%d_%H%M%S"))
+    name: str = af.build_filename(device_start, af.QUALITY_UNSYNCED, af.POS_TOP, 41,
+                                  recovered=True)
+    path: str = os.path.join(tmp, name)
+    with af.Writer(path, af.Header(start_epoch=device_start,
+                                   position=af.POS_TOP)) as w:
+        for block in make_blocks(3):
+            w.write_block(block)
+    af.write_timeinfo(path, {"device_start_epoch": device_start,
+                             "quality": af.QUALITY_UNSYNCED, "boot_count": 41})
+
+    offset: float = 137.0
+    final = af.apply_correction(path, offset)
+    assert final is not None
+    new_name: str = os.path.basename(final)
+    check("보정된 파일이 있다", os.path.exists(final), new_name)
+    check("원래 파일은 사라졌다", not os.path.exists(path), name)
+    check(".unsynced 가 떨어졌다", ".unsynced" not in new_name, new_name)
+    check("부팅 번호가 떨어졌다", "b0041" not in new_name, new_name)
+    check(".recovered 는 남는다", ".recovered" in new_name, new_name)
+    check("위치는 그대로", new_name.startswith("TOP_"), new_name)
+
+    parsed = af.parse_filename(new_name)
+    assert parsed is not None
+    check("이제 신뢰됨", parsed["trusted"], new_name)
+    check("시작 시각이 보정만큼 옮겨졌다",
+          abs(parsed["start_epoch"] - (device_start + offset)) < 1.0,
+          str(parsed["start_epoch"]))
+
+    start, quality = af.effective_start(final)
+    check("effective_start 도 보정값", abs(start - (device_start + offset)) < 1.0)
+    check("품질이 신뢰됨", quality in af.TRUSTED_QUALITIES, quality)
+
+    info = af.read_timeinfo(final)
+    assert info is not None
+    check("사이드카가 따라왔다", abs(float(info["offset_seconds"]) - offset) < 0.01)
+    check("장치가 믿었던 시각은 보존", 
+          abs(float(info["device_start_epoch"]) - device_start) < 1.0)
+
+    # Already trusted: nothing to do, and re-timing one would move a good time.
+    good: str = af.build_filename(device_start, af.QUALITY_SYNCED, af.POS_TOP)
+    good_path: str = os.path.join(tmp, good)
+    with af.Writer(good_path, af.Header(start_epoch=device_start,
+                                        position=af.POS_TOP)) as w:
+        for block in make_blocks(2):
+            w.write_block(block)
+    check("이미 신뢰된 파일은 건드리지 않는다",
+          af.apply_correction(good_path, offset) is None)
+    check("그 파일은 그대로 있다", os.path.exists(good_path), good)
+
+
 def test_safe_join(tmp: str) -> None:
-    print("\n[8] 경로 검증")
+    print("\n[9] 경로 검증")
     good: str = af.build_filename(time.time(), af.QUALITY_SYNCED, af.POS_TOP)
     check("accepts a valid name", af.safe_join(tmp, good) is not None)
     for bad in ("../../etc/passwd", "sub/TOP_20260827_143012.ahrsbin", "..\\x.ahrsbin"):
@@ -284,7 +343,7 @@ def test_safe_join(tmp: str) -> None:
 
 
 def test_merge(tmp: str) -> None:
-    print("\n[9] 연속 그룹 병합")
+    print("\n[10] 연속 그룹 병합")
     rate: int = 25
     base: float = time.time()
     paths: list[str] = []
@@ -312,7 +371,7 @@ def test_merge(tmp: str) -> None:
 
 
 def test_boot_counter(tmp: str) -> None:
-    print("\n[10] 부팅 카운터")
+    print("\n[11] 부팅 카운터")
     first: int = af.next_boot_count(tmp)
     second: int = af.next_boot_count(tmp)
     check("increments", second == first + 1, "{0} -> {1}".format(first, second))
@@ -330,6 +389,7 @@ def main() -> int:
         test_truncate_and_recover(tmp)
         test_timeinfo_recovery(tmp)
         test_filenames()
+        test_apply_correction(tmp)
         test_safe_join(tmp)
         test_merge(tmp)
         test_boot_counter(tmp)

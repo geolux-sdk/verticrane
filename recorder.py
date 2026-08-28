@@ -797,6 +797,43 @@ class Recorder:
             self._write_timeinfo(self.writer.path, correction)
             logger.info("Recorded a {:+.2f}s correction for {}",
                         correction, os.path.basename(self.writer.path))
+        self._retime_this_boot(correction)
+
+    def _retime_this_boot(self, correction: float) -> None:
+        """Re-time the recordings this boot has already finished.
+
+        They were named from the same wrong clock as the open one, and
+        monotonic time ran unbroken across all of them, so the correction that
+        just fixed the open file fixes those too. Without this a measurement
+        made out of range and stopped before the vehicle drove back into it
+        stayed 시각 미확인 for good: nothing else ever revisits a finalised
+        name, and the offset is known only while this boot lasts.
+
+        Files carried over from an earlier boot keep that boot's number and are
+        left alone -- their clock error was never measured.
+        """
+        try:
+            names: list[str] = os.listdir(self.data_dir)
+        except OSError as exc:
+            logger.error("Cannot re-time in {}: {}", self.data_dir, exc)
+            return
+        for name in sorted(names):
+            if not name.endswith(af.EXT):
+                continue
+            parsed: Optional[dict] = af.parse_filename(name)
+            if parsed is None or parsed["trusted"]:
+                continue
+            if int(parsed["boot_count"]) != self.boot_count:
+                continue
+            try:
+                final: Optional[str] = af.apply_correction(
+                    os.path.join(self.data_dir, name), correction)
+            except (OSError, af.FormatError) as exc:
+                logger.error("Could not re-time {}: {}", name, exc)
+                continue
+            if final is not None:
+                logger.info("Re-timed {} -> {} ({:+.2f}s)",
+                            name, os.path.basename(final), correction)
 
     def _write_timeinfo(self, path: str, correction: float = 0.0) -> None:
         info: dict[str, Any] = {
