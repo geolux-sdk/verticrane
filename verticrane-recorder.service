@@ -16,8 +16,17 @@
 
 [Unit]
 Description=Verticrane AUTO_RUN tilt recorder
-After=network.target
-Wants=network-online.target
+# Deliberately not ordered after the network. Everything this service needs is
+# local -- the sensor is on the serial port, the panel on SPI, and the web
+# server binds 0.0.0.0, which works before any interface is up. Waiting for
+# NetworkManager put it ~5 s further into the boot, and every one of those
+# seconds is a second the e-paper still shows the frame from the last power
+# cut. Booting away from any network is this device's normal case, not its
+# exception, so waiting for one is the wrong way round.
+#
+# Wants=network-online.target is gone with it: it pulled in
+# NetworkManager-wait-online, which spends 50 s establishing something nothing
+# here is waiting for.
 # Never give up restarting. The default start limit would stop trying after a
 # few rapid crashes, which on an unattended device means silently no data.
 StartLimitIntervalSec=0
