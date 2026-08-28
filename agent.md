@@ -12,6 +12,17 @@ Three devices go on one crane at **BASE / MIDDLE / TOP**.
 The requirements are the source of truth: **[TILT_기록시스템_구현요구사항.md](TILT_기록시스템_구현요구사항.md)**.
 Section numbers referenced in code comments point there.
 
+| Document | Audience |
+|---|---|
+| `TILT_기록시스템_구현요구사항.md` | Design rationale. Read before changing behaviour |
+| `README.md` | Developers: layout, install, run, HTTP API, format, tests |
+| `doc/운영자_안내서.md` | Operators: usage, reading the panel, collecting files |
+| `doc/protocol.md` | Sensor register map |
+
+Behaviour changes usually touch three of these. The requirements say why, the
+README says what the interface is, and the operator guide says what someone in a
+crane basket sees.
+
 ## Layout
 
 The split is deliberate: **the recorder owns the serial port**, so nothing in `dev/`
@@ -21,7 +32,7 @@ can run while it does.
 
 | File | Role |
 |---|---|
-| `recorder.py` | Recording loop and the four-state boot sequence (§3) |
+| `recorder.py` | Recording loop and the five-state boot sequence (§3) |
 | `ahrs_file.py` | `.dat` format: header, blocks, slot names, recovery, merge (§5) |
 | `stability.py` | Decides when recording may begin (§4) |
 | `filestore.py` | File listing, continuity groups, trash (§5.4, §7) |

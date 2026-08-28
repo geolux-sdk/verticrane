@@ -962,7 +962,8 @@ sudo systemctl start verticrane-recorder    # 끝나면 되돌리기
 | 파일 | 내용 |
 | --- | --- |
 | 이 문서 | 포맷 명세, API, 설계 근거 |
-| `README.md` | 운영자용 사용법 / 설치 / 개발자용 |
+| `README.md` | **개발자용** — 구조·설치·실행·HTTP API·포맷·테스트 |
+| `doc/운영자_안내서.md` | **운영자용** — 쓰는 법, 화면 읽는 법, 파일 받기 |
 | `agent.md` | 구조와 이 코드베이스에서 틀리기 쉬운 것들 |
 | `doc/protocol.md` | 센서 레지스터 맵 |
 | `doc/raspberry_pi.md` | 파이 설치 상세 |

@@ -1,145 +1,126 @@
 # Verticrane 기울기 기록 시스템
 
 크레인의 수직도를 재는 무인 기록 장치입니다. **Raspberry Pi Zero 2 W**에
-**HWT9037-485**(9축 IMU)를 붙여, 전원만 넣으면 스스로 기록을 시작하고
-운영자는 브라우저로 파일을 받아 갑니다.
+**HWT9037-485**(9축 IMU)를 RS-485로 붙여, 전원만 넣으면 스스로 25 Hz로 기록을
+시작하고 운영자는 브라우저로 파일을 받아 갑니다. 한 크레인에
+**BASE / MIDDLE / TOP** 세 대를 답니다.
 
-한 크레인에 **BASE / MIDDLE / TOP** 세 대를 설치해 높이별 기울기를 봅니다.
+**이 문서는 개발자용입니다.** 현장에서 쓰는 법은
+[doc/운영자_안내서.md](doc/운영자_안내서.md)를 보세요.
 
-| | |
+| 문서 | 내용 |
 |---|---|
-| 요구사항 | [TILT_기록시스템_구현요구사항.md](TILT_기록시스템_구현요구사항.md) |
-| 센서 프로토콜 | [doc/protocol.md](doc/protocol.md) |
-| 라즈베리파이 안내 | [doc/raspberry_pi.md](doc/raspberry_pi.md) |
+| [TILT_기록시스템_구현요구사항.md](TILT_기록시스템_구현요구사항.md) | **설계 근거.** 무엇을 왜 그렇게 정했는지. 코드를 고치기 전에 읽으세요 |
+| [doc/운영자_안내서.md](doc/운영자_안내서.md) | 현장 사용법 |
+| [doc/protocol.md](doc/protocol.md) | 센서 레지스터 맵과 환산 |
+| [doc/raspberry_pi.md](doc/raspberry_pi.md) | 파이 설치 상세 |
+| [bt/README.md](bt/README.md) | 블루투스 Wi-Fi 프로비저닝 |
+| [agent.md](agent.md) | 작업 규칙과 이 코드베이스에서 틀리기 쉬운 것들 |
 
 ---
 
-# 운영자용
+## 목차
 
-## 쓰는 법
-
-1. **전원을 켭니다.**
-2. **차량 근처라면** 브라우저로 접속하세요. 주소는 **e-paper 화면 아래에 나옵니다.**
-   ```
-   http://192.168.0.19:8080
-   ```
-   기록 중에 접속하면 **그 기록은 버려집니다.** 차량 옆에서 도는 기록은 측정이
-   아니니까요. 진짜 측정 파일은 이미 목록에 있습니다.
-3. **측정 지점에서 켜면** 전원을 켜고 **크레인에 올라가 장비를 다는 동안**(1분)
-   기다렸다가, 센서가 안정되면 **자동으로 기록을 시작합니다.** 따로 할 일이 없습니다.
-4. 회수한 뒤 다시 켜서 접속하면 목록에서 파일을 받습니다.
-
-> `pi-tilt001.local` 같은 이름으로는 접속되지 않을 수 있습니다. 통신사 DNS가
-> 없는 도메인에 엉뚱한 주소를 돌려주는 경우가 있어 mDNS가 묻히기 때문입니다.
-> **IP를 쓰세요.** 고정하고 싶으면 공유기에서 MAC 기준으로 IP를 배정하거나,
-> Windows `C:\Windows\System32\drivers\etc\hosts`에
-> `192.168.0.19 pi-tilt001` 한 줄을 넣으면 됩니다.
-
-## 화면 보는 법
-
-e-paper 화면은 **전원이 꺼져도 그대로 남습니다.** 장비에 붙은 명패이기도 합니다.
-지금 무엇을 하는 중이냐에 따라 **다섯 가지 화면**이 나옵니다.
-
-**켜지는 중** — 전원을 넣고 10초쯤
-
-```
-┌────────────────────────────────┐
-│▓ pi-tilt001              TOP  ▓│   흑백이 뒤집힌 화면입니다
-│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
-│▓        GEOLUX                ▓│   화면이 이렇게 바뀌면
-│▓       verticrane             ▓│   장비가 살아난 것입니다
-└────────────────────────────────┘
-```
-
-> 전원을 넣고 **약 11초 뒤**에 바뀝니다. 그 전까지는 지난번에 끄기 직전 화면이
-> 그대로 남아 있어서, 켜진 장비와 꺼진 장비가 똑같아 보입니다. 파이가 부팅하는
-> 시간이라 더 줄일 수 없습니다.
-
-**설치 중** — 그다음부터, 기록이 시작될 때까지
-
-```
-┌────────────────────────────────┐
-│ pi-tilt001              TOP    │
-├────────────────────────────────┤
-│         ↑Z                     │
-│     ┌────────┐                 │  Z가 위를 향하게 답니다
-│     │  ⊙Y →X │                 │
-│     ├────────┤                 │
-│     ▨▨▨▨▨▨▨▨                  │  빗금 친 면을 구조물에 붙입니다
-│       접촉면                    │
-├────────────────────────────────┤
-│         192.168.0.19           │
-└────────────────────────────────┘
-```
-
-**기록 시작** — 15초간
-
-```
-│▓▓▓▓▓▓▓ 기록 중 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
-```
-
-**측정 중** — 그다음부터
-
-```
-│          0.062                 │  기울기 (%)
-│          % tilt                │
-│         26.3°C                 │  온도
-│ REC  2:15:23   12475 smp       │
-```
-
-**접속 중** — 브라우저로 접속하면
-
-```
-│         GEOLUX                 │
-│        verticrane              │
-```
-
-- **화면은 일이 생길 때만 바뀝니다.** 켜짐 · 설치 안내 · 기록 시작 · 측정 시작 ·
-  접속 — 이때 한 번씩입니다. 측정 화면만 1분마다 숫자를 새로 씁니다. 실시간 값은
-  브라우저에서 보세요.
-- 맨 아래 줄은 **접속 주소**입니다. `NO NETWORK`가 검은 띠로 나오면 아직 네트워크에
-  못 붙은 것이고, 크레인 위에서는 정상이며 기록에는 지장이 없습니다.
-- **시각은 표시하지 않습니다.** 장비는 자기 시계가 맞는지 알 방법이 없습니다.
-  언제 기록한 것인지는 웹 목록에서 보세요.
-- **화면은 값을 보여줄 뿐 판정하지 않습니다.** 기울기가 괜찮은지는 파일을
-  가져가는 서버가 정합니다.
-
-## 설치할 때
-
-**설치 위치(BASE / MIDDLE / TOP)를 반드시 지정하세요.** 설정 화면에서 고릅니다.
-지정하지 않으면 파일 이름이 `UNSET_`으로 시작해서, 나중에 어느 높이의 데이터인지
-알 수 없게 됩니다.
-
-- 빗금 친 **아랫면**을 구조물에 붙입니다.
-- **Z축이 위**를 향하게 놓습니다.
-- **한번 설치한 뒤에는 방향을 바꾸지 마세요.** 방향이 바뀌면 그 전후 데이터를
-  같이 볼 수 없습니다.
-
-## 파일 받기
-
-목록에서 **받기**를 누르면 됩니다.
-
-- 받은 파일은 목록에서 사라지고 휴지통에 7일간 남습니다.
-- **전송이 중간에 끊기면 파일은 그대로 있습니다.** 다시 받으세요.
-- 시간이 이어지는 파일은 **하나로 합쳐서** 받을 수 있습니다.
-- 파일 이름은 **설치 위치 + 슬롯 번호**입니다: `TOP_003.dat`
-
-  번호는 `000`부터 `999`까지 세고 다시 `000`으로 돌아오며, 그 자리에 파일이 남아
-  있으면 **덮어씁니다.** 장비는 노트북으로 옮기기 전 임시 보관소이지 저장소가
-  아닙니다 — 받아가신 파일은 목록에서 사라지므로 평소에는 부딪칠 일이 없습니다.
-
-  이름에 시각이 없습니다. **언제 기록한 것인지는 목록의 시각 열**을 보세요.
-
-| 표시 | 뜻 |
-|---|---|
-| `UNSET_` | 설치 위치를 지정하지 않았습니다 |
-| `· 전원 차단 복구` | 전원이 갑자기 끊겨 마지막 1초쯤이 잘렸습니다 |
+1. [구조](#1-구조) · 2. [동작 개요](#2-동작-개요) · 3. [설치](#3-설치) ·
+4. [실행](#4-실행) · 5. [HTTP API](#5-http-api) · 6. [파일 포맷](#6-파일-포맷) ·
+7. [설정](#7-설정) · 8. [개발자 도구](#8-개발자-도구) · 9. [테스트](#9-테스트) ·
+10. [문제 해결](#10-문제-해결)
 
 ---
 
-# 설치 (라즈베리파이)
+## 1. 구조
 
-## 0. 시리얼 포트 열기 (최초 1회)
+### 운영 (저장소 루트) — systemd가 띄우는 것
+
+| 파일 | 역할 |
+|---|---|
+| `recorder.py` | **진입점.** 기록 루프와 상태 기계, 25 Hz 폴링 |
+| `ahrs_file.py` | `.dat` 포맷 — 헤더·블록·슬롯 이름·복구·병합 |
+| `stability.py` | 안정화 판정 (자이로 RMS·가속도 표준편차·자세각 표준편차) |
+| `filestore.py` | 파일 목록·연속 그룹·휴지통 |
+| `web/` | 운영자 웹 (Flask, 8080). `routes.py` + `templates/` |
+| `eink_panel.py` | e-paper 화면 구성과 갱신 스레드 |
+| `gdey0154d67.py` | e-paper 드라이버 (SSD1681, SPI0) |
+| `read_status.py` | 센서 연결·상태 읽기 **(recorder가 사용)** |
+| `hwt9037_485.py` | 장치 모델 (Modbus RTU) |
+| `port_config.py` | 시리얼 포트 결정 |
+| `app_config.py` | 설정·PIN·로깅 (`config.json`) |
+| `verticrane-recorder.service` | systemd 유닛 |
+| `install.sh` `install_requirements.sh` `update.sh` `test.sh` | 설치·배포·점검 |
+
+### 데이터 (`data/`)
+
+| 이름 | 내용 |
+|---|---|
+| `FLAG_NNN.dat` | 기록 파일 |
+| `FLAG_NNN.dat.partial` | 기록 중 (목록에 뜨지 않음) |
+| `.slot` | 슬롯 카운터 |
+| `.lastknown` | 마지막으로 알던 시각 |
+| `.bootcount` | 부팅 횟수 (로그용) |
+| `trash/` | 받아간 파일. 7일 뒤 삭제 |
+| `corrupt/` | 헤더가 깨져 격리된 파일 |
+
+### 의존 관계
+
+```
+recorder.py --> ahrs_file.py      포맷
+            --> stability.py      판정
+            --> filestore.py      목록·휴지통
+            --> read_status.py --> hwt9037_485.py --> pymodbus
+            --> web/           --> filestore.py
+            --> eink_panel.py  --> gdey0154d67.py --> spidev, lgpio
+```
+
+`web/`과 `eink_panel.py`는 **각각 별도 스레드**에서 돌고, recorder가 준비해 둔
+스냅샷만 읽습니다. 패널 갱신 1회가 SPI에서 1.4초를 잡아먹기 때문에 폴링 루프에
+둘 수 없습니다.
+
+---
+
+## 2. 동작 개요
+
+```
+전원 --11초--> recorder --60초--> 설치 유예 --60초--> 접속 대기 --> 안정화 --> 기록
+                                                        |
+                                                   접속하면 --> maintenance
+```
+
+상태는 다섯입니다.
+
+| 상태 | 의미 |
+|---|---|
+| `waiting_mount` | 설치 유예. 크레인에 오르는 시간 |
+| `waiting_http` | 접속 대기. 네트워크가 있을 때만 |
+| `waiting_stable` | 센서 안정화 대기 |
+| `recording` | 기록 중 |
+| `maintenance` | 접속이 있었다. 자동 기록하지 않는다 |
+
+**기록을 시작하는 길은 자동 하나뿐입니다.** 웹에 시작 버튼이 없습니다 — 페이지에
+닿았다는 것 자체가 "사람이 옆에 있다"는 뜻이고 그건 자동 기록을 억제하는 조건이라,
+시작을 요청하는 것은 자기 존재가 부정하는 일을 해 달라는 뜻이 됩니다 (요구사항 §3).
+
+**기록 중에 유효한 HTTP 요청이 오면 그 기록은 휴지통으로 갑니다.** 상태 페이지의
+자기 갱신은 `?auto=1`을 달아 예외로 둡니다.
+
+---
+
+## 3. 설치
+
+### 새 장비 — 한 번에
+
+```bash
+git clone https://github.com/geolux-sdk/verticrane.git ~/verticrane
+cd ~/verticrane && chmod +x *.sh dev/*.sh
+./install.sh              # 진단 후 필요한 것만 적용. --dry 로 미리 보기
+```
+
+`install.sh`가 하는 일: UART/SPI 활성화, `dtoverlay=miniuart-bt` 전환, 그룹 가입
+(`dialout`/`spi`/`gpio`), 파이썬 의존성, cloud-init 해제, systemd 유닛 등록.
+
+### 수동으로 할 때
+
+<details>
+<summary><b>0. 시리얼 포트 열기 (최초 1회)</b></summary>
 
 파이의 온보드 UART는 기본적으로 꺼져 있고 시리얼 콘솔이 포트를 점유합니다.
 게다가 Zero 2 W는 성능이 좋은 PL011을 블루투스가 가져가고 GPIO에는 mini UART를
@@ -147,14 +128,14 @@ e-paper 화면은 **전원이 꺼져도 그대로 남습니다.** 장비에 붙�
 프레임이 깨질 수 있습니다.
 
 ```bash
-sudo cp /boot/firmware/config.txt  /boot/firmware/config.txt.bak
-sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
+sudo cp /boot/firmware/config.txt /boot/firmware/config.txt.bak
 
-sudo tee -a /boot/firmware/config.txt >/dev/null <<'EOF'
+sudo tee -a /boot/firmware/config.txt >/dev/null <<'CFG'
 
 enable_uart=1
-dtoverlay=disable-bt
-EOF
+dtoverlay=miniuart-bt      # 센서는 PL011, 블루투스는 mini UART
+dtparam=spi=on             # e-paper
+CFG
 
 sudo sed -i 's/console=serial0,115200 //' /boot/firmware/cmdline.txt
 sudo reboot
@@ -162,78 +143,244 @@ sudo reboot
 
 재부팅 후 `ls -l /dev/serial0`에서 `-> ttyAMA0`이 보이면 정상입니다.
 
-> 블루투스도 써야 한다면 `disable-bt` 대신 **`miniuart-bt`** 를 쓰세요. 포트 경로가
-> 그대로라 코드 수정이 필요 없습니다. 대신 코어 클럭이 250MHz로 고정됩니다.
+`dtoverlay=disable-bt`를 쓰면 블루투스가 죽어 **BLE Wi-Fi 프로비저닝을 못 씁니다.**
+`miniuart-bt`는 센서에 PL011을 유지하면서 블루투스를 살려 둡니다.
 
-## 1. 장비 이름 정하기
+</details>
 
-**hostname이 그대로 SENSOR_ID가 되고 접속 주소가 됩니다.** 의미 있게 지으세요.
+<details>
+<summary><b>1~5. 이름 · 의존성 · 센서 · 점검 · 서비스</b></summary>
 
 ```bash
+# hostname 이 그대로 SENSOR_ID 가 되고 접속 주소가 됩니다
 sudo hostnamectl set-hostname pi-tilt001
-```
 
-## 2. 설치
+./install_requirements.sh                  # sudo 없이!
+sudo usermod -aG dialout,spi,gpio $USER    # 재로그인 필요
+sudo apt install -y fonts-nanum            # 없으면 패널 한글이 영문으로 대체
 
-```bash
-cd ~
-git clone https://github.com/geolux-sdk/verticrane.git
-cd verticrane
-chmod +x *.sh dev/*.sh
-./install_requirements.sh          # sudo 없이!
-sudo usermod -aG dialout $USER     # 재로그인 필요
-```
+.venv/bin/python dev/configure_sensor.py --baud 115200   # 센서 최초 설정
+./test.sh                                                # 자가 점검
 
-`fonts-nanum`이 없으면 e-paper의 한글이 영문으로 대체됩니다:
-```bash
-sudo apt install -y fonts-nanum
-```
-
-## 3. 센서 설정 (최초 1회)
-
-```bash
-.venv/bin/python dev/configure_sensor.py --baud 115200
-```
-
-## 4. 자가 점검
-
-```bash
-./test.sh --no-hardware    # 소프트웨어만
-./test.sh                  # 센서 포함
-```
-
-## 5. 상시 가동
-
-```bash
 sudo cp verticrane-recorder.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now verticrane-recorder
-
-# 예전 대시보드 서비스가 등록돼 있다면 반드시 끄세요 (같은 시리얼 포트를 다툽니다)
 sudo systemctl disable --now verticrane-dashboard 2>/dev/null || true
 ```
 
-관리:
-```bash
-systemctl status verticrane-recorder
-journalctl -u verticrane-recorder -f
-```
+</details>
 
-## 6. 업데이트
+### 업데이트
 
 ```bash
-./update.sh
-sudo systemctl restart verticrane-recorder
+./update.sh && sudo systemctl restart verticrane-recorder
 ```
 
 ---
 
-# 개발자용
+## 4. 실행
 
-`dev/`에 있는 도구들은 **운영자에게 노출되지 않습니다.** 웹에서 접근할 수 있는
-숨겨진 링크도 없습니다. SSH로 접속해서 직접 실행하는 것이 유일한 방법입니다.
+```bash
+# systemd (상시 가동)
+systemctl status verticrane-recorder
+journalctl -u verticrane-recorder -f
 
-## 중요: 시리얼 포트는 하나뿐입니다
+# 직접 실행 — 서비스를 먼저 멈춰야 합니다 (시리얼 포트가 하나뿐)
+./dev/devmode.sh .venv/bin/python recorder.py
+```
+
+### `recorder.py` 옵션
+
+| 옵션 | 뜻 |
+|---|---|
+| `--port /dev/ttyUSB0` | 시리얼 포트 고정 (기본은 자동 결정) |
+| `--data-dir PATH` | 기록 디렉터리 |
+| `--force recording` | 대기를 건너뛰고 바로 안정화 → 기록 |
+| `--force maintenance` | 기록하지 않고 웹만 |
+| `--seconds N` | N초 뒤 정상 종료 |
+| `--http-wait N` | `http_wait_seconds` 덮어쓰기 |
+| `--port-http N` | 웹 포트 |
+| `--no-web` / `--no-panel` | 각각 끄기 |
+| `--require-sensor` | 센서가 없으면 기동 실패 (기본은 계속 진행) |
+
+---
+
+## 5. HTTP API
+
+포트 8080. 다운로드를 제외하고 응답은 JSON입니다.
+
+> ### 접속에는 부작용이 있습니다
+>
+> `/healthz`와 `?auto=1`이 붙은 요청을 뺀 **모든 요청이 "운영자가 왔다"로
+> 세어집니다.** 자동 기록이 억제되고, 기록 중이었다면 그 기록이 휴지통으로 갑니다.
+> 스크립트로 폴링할 때는 반드시 `?auto=1`을 붙이세요.
+
+### 상태
+
+| | |
+|---|---|
+| `GET /api/status` | 현재 상태 |
+| `GET /healthz` | 살아 있는지만. 접속으로 세지 않음 |
+
+```json
+{
+  "sensor_id": "pi-tilt001", "position": "TOP", "device_serial": "WT4200068151",
+  "state": "recording", "file": "TOP_003.dat.partial",
+  "started_at": 1772179369.29, "elapsed_s": 812.4,
+  "samples": 20310, "blocks": 812,
+  "tilt_pct": 0.0623, "temp_c": 26.3,
+  "sensor_ok": true, "device_time": "2026-08-28 12:02:25",
+  "stability": { "stable": true, "reason": "STABLE", "metrics": [] },
+  "config_warnings": [], "free_mb": 23057.0
+}
+```
+
+### 파일
+
+| | |
+|---|---|
+| `GET /api/files` | 확정 파일 목록 + 통계 |
+| `GET /api/files/{name}` | 단일 파일 다운로드 |
+| `GET /api/groups/{id}` | 연속 그룹을 하나로 병합해 다운로드 |
+| `POST /api/files/{name}/collected` | 받았음을 확인 → 휴지통으로 이동 |
+| `POST /api/groups/{id}/collected` | 그룹 전체를 받았음을 확인 |
+| `DELETE /api/files/{name}` | 삭제 (PIN 필요) |
+
+```json
+{
+  "files": [{
+    "name": "TOP_003.dat", "size": 1889952, "slot": 3,
+    "start_epoch": 1772179369.29, "start": "2026-08-28 12:02:25",
+    "duration_s": 1534.0, "samples": 38350, "blocks": 1534,
+    "recovered": false, "position": "TOP", "group": 0
+  }],
+  "groups": [{ "group": 0, "files": 1, "bytes": 1889952, "duration_s": 1534.0 }],
+  "stats": { "files": 1, "groups": 1, "bytes": 1889952, "trashed": 0, "free_mb": 23057.0 }
+}
+```
+
+**전송이 끝났는지 서버는 알 수 없습니다.** 응답이 완료됐다는 것은 바이트가 소켓에
+나갔다는 뜻일 뿐입니다. 그래서 파일을 은퇴시키는 것은 다운로드가 아니라 브라우저가
+보내는 `/collected`입니다. 중간에 끊기면 이 요청이 오지 않아 파일이 목록에 남습니다.
+
+### 제어
+
+| | |
+|---|---|
+| `POST /api/record/stop` | 기록 중지 및 파일 확정 |
+| `GET /settings` `POST /settings` | 설정 화면 (저장에 PIN 필요) |
+
+**시작하는 API는 없습니다** ([2. 동작 개요](#2-동작-개요) 참조).
+
+### 파일명 검증
+
+경로 구분자와 `..`를 허용하지 않고 `FLAG_NNN.dat` 정규식에 정확히 맞는 것만
+받습니다. 통과한 뒤에도 열기 전에 `realpath`로 `data/` 하위인지 다시 확인합니다.
+
+---
+
+## 6. 파일 포맷
+
+`.dat` — 64바이트 헤더 + 1232바이트 고정 블록의 반복. 자세한 것은 요구사항 §5.
+
+### 이름
+
+```
+FLAG_NNN.dat            TOP_003.dat
+FLAG_NNN.dat.partial    기록 중
+```
+
+**이름은 카드 위의 자리이지 내용 설명이 아닙니다.** 시각도 복구 여부도 들어 있지
+않고 전부 헤더 안에 있습니다. 슬롯은 `000`~`999`를 돌며 **덮어씁니다** — 장비는
+노트북으로 옮기기 전의 버퍼이지 저장소가 아닙니다.
+
+> 이름에 사실을 적으면 사실이 바뀔 때 이름을 바꿔야 하고, 그 이름을 읽는 코드
+> 전부가 철자에 합의해야 합니다. 접미사 순서에 대한 불일치 하나가 멀쩡한 기록을
+> 카드에 남겨 둔 채 운영자 목록에서 지운 적이 있습니다.
+
+### 헤더 (64 B)
+
+| 오프셋 | 내용 | 크기 |
+|---|---|---|
+| 0 | magic `AHRSBIN` + NUL | 8 |
+| 8 | 포맷 버전 (현재 **2**) | 2 |
+| 10 | 블록 크기 (1232) | 2 |
+| 12 | 블록당 샘플 수 (25) | 2 |
+| 14 | 샘플레이트 Hz (25) | 2 |
+| 16 | **기록 시작 시각** (double) | 8 |
+| 24 | SENSOR_ID (hostname) | 16 |
+| 40 | SENSOR_FLAG (0 UNSET / 1 BASE / 2 MIDDLE / 3 TOP) | 2 |
+| 42 | 장치 시리얼 | 12 |
+| 54 | **파일 플래그** (bit 0 = 전원 차단 복구) | 1 |
+| 55 | 예약 | 5 |
+| 60 | 헤더 CRC32 (앞 60바이트) | 4 |
+
+**오프셋 16이 시각의 전부이고 아무것도 이것을 고치지 않습니다.** 장비는 자기
+시계가 맞는지 확인할 방법이 없어 등급을 매기지 않습니다 — 시각 품질도, 소급
+보정도, 사이드카도 없습니다 (요구사항 §3).
+
+목록 정렬과 연속 그룹 병합이 이 값을 쓰는데 **차이만** 쓰므로 절대값이 틀려도
+성립합니다. 한 카드의 모든 기록이 같은 시계에서 나왔기 때문입니다.
+
+헤더를 다시 쓰는 곳은 **복구 단계 하나뿐**입니다. 그때 파일은 아직 확정되지 않았고
+읽거나 덧붙이는 것이 없습니다.
+
+### 블록 (1232 B)
+
+25샘플 묶음. 샘플마다 12개 float — Roll/Pitch/Yaw, 가속도 3축, 자이로 3축, 자기 3축.
+블록마다 CRC32와 상태 플래그가 붙습니다.
+
+| 플래그 | 뜻 |
+|---|---|
+| bit 0 | 이 블록을 채우는 동안 시리얼 읽기 실패 |
+| bit 1 | 시리얼 링크 재접속 |
+| bit 2 | 안정화 기준을 벗어난 구간 |
+
+**블록의 경과 시간은 단조 시계 기준이라 언제나 정확합니다.** 시계를 못 믿어도
+"기록 시작 후 3분 12초"는 맞습니다. 못 믿는 것은 몇 월 며칠인지뿐입니다.
+
+### CSV 변환
+
+```bash
+.venv/bin/python dev/ahrsbin_to_csv.py data/TOP_003.dat
+.venv/bin/python dev/ahrsbin_to_csv.py data/*.dat --report
+```
+
+---
+
+## 7. 설정
+
+`config.json`의 `recorder` 섹션. 전체 목록과 근거는 요구사항 §10.
+
+**웹 화면에서 바꾸는 것** — 운영자가 현장에서 정해야 하는 값
+
+`sensor_flag` · `mount_delay_seconds` · `http_wait_seconds` ·
+`network_wait_seconds` · `segment_minutes` · `delete_after_download` ·
+`trash_retention_days` · `min_free_mb`
+
+**파일에서만 바꾸는 것** — 공학적으로 정해진 값
+
+`stability_window_seconds` · `stability_min_samples` · `gyro_rms_max_dps` ·
+`accel_std_max_g` · `attitude_std_max_deg` · `stop_on_unstable` ·
+`record_fsync_interval_seconds` · `merge_gap_tolerance_seconds` ·
+`time_save_interval_seconds` · `ip_check_interval_seconds` · `contact_face` ·
+`panel_refresh_seconds` · `panel_rotation` · `http_port`
+
+> **안정화 기준을 화면에 두지 않은 이유:** 손으로 만지면 기록이 아예 시작되지
+> 않거나 흔들리는 중에 시작됩니다. 화면에 있는 설정은 언젠가 누군가 바꿉니다.
+
+`panel_refresh_seconds`는 **측정 화면에만** 적용됩니다. 나머지 화면은 이벤트로만
+그립니다. **초 단위로 낮추지 마세요** — 갱신 1회가 1.4초이고 패널 수명이 갱신
+횟수로 정해집니다 (1초 주기면 약 2주에 소진).
+
+---
+
+## 8. 개발자 도구
+
+`dev/`의 도구들은 **운영자에게 노출되지 않습니다.** 웹에서 갈 수 있는 숨은 링크도
+없고, SSH로 직접 실행하는 것이 유일한 방법입니다.
+
+### 시리얼 포트는 하나뿐입니다
 
 기록기가 포트를 점유하고 있어 `dev/` 도구 대부분이 그냥은 동작하지 않습니다.
 **`devmode.sh`를 쓰세요** — 서비스를 멈추고, 명령을 실행하고, **끝나면 반드시
@@ -242,104 +389,129 @@ sudo systemctl restart verticrane-recorder
 ```bash
 ./dev/devmode.sh                                    # 개발자 셸 (나가면 복구)
 ./dev/devmode.sh .venv/bin/python read_status.py    # 명령 하나만
-./dev/devmode.sh ./dev/run_dashboard.sh             # 대시보드
+./dev/devmode.sh ./dev/run_dashboard.sh             # Streamlit 대시보드
 ```
 
 > 손으로 `systemctl stop`을 하는 것은 쉽지만 다시 켜는 것을 잊기는 더 쉽습니다.
 > 조용히 기록을 멈춘 현장 장비가 이 프로젝트에서 가장 나쁜 결과입니다.
 
-## 기록 파일 다루기
+| 파일 | 역할 |
+|---|---|
+| `devmode.sh` | 서비스를 멈추고 도구를 실행한 뒤 되살림 |
+| `ahrsbin_to_csv.py` | `.dat` → CSV 변환, `--report`로 분석까지 |
+| `configure_sensor.py` | 센서 설정 (6축 알고리즘, baud) |
+| `dashboard.py` `pages/setup.py` | Streamlit 분석 대시보드 |
+| `analyze_tilt.py` | CSV 분석 (통계·FFT) |
+| `log_tilt.py` | CSV 직접 기록 (구형) |
+| `eink_status.py` `eink_test.py` | 패널 시험 |
+| `test.py` | 대시보드 자가 점검 |
+| `install_requirements.bat` | Windows 개발 환경 |
+
+### e-paper 미리보기 — 하드웨어 없이
 
 ```bash
-# .dat -> CSV (기존 분석 도구가 읽는 형식)
-.venv/bin/python dev/ahrsbin_to_csv.py data/TOP_003.dat
-
-# 변환하고 분석 리포트까지
-.venv/bin/python dev/ahrsbin_to_csv.py data/*.dat --report
+python eink_panel.py --out panel.png --scale 3 --screen boot
+python eink_panel.py --out panel.png --screen install --position BASE
 ```
 
-## 기준값 맞추기
+`--screen`은 `boot` / `install` / `record` / `measure` / `brand`.
 
-기록된 CSV로 안정화 판정 기준을 검증할 수 있습니다. 하드웨어가 필요 없습니다.
+### 안정화 기준 재검증 — 하드웨어 없이
 
 ```bash
 python stability.py data/*.csv
 python stability.py data/*.csv --gyro-rms 0.1     # 기준을 바꿔 시험
 ```
 
-## e-paper 화면 미리보기
+---
+
+## 9. 테스트
+
+### 하드웨어 없이 — 언제나 통과해야 합니다
 
 ```bash
-python eink_panel.py --out panel.png --scale 3    # 하드웨어 없이 PNG로
-python eink_panel.py --position BASE --alarm      # 실제 패널에 그리기
+python test_ahrs_file.py     # 포맷: 쓰기 → 자르기 → 복구 → 복구 표식 → 병합 → 슬롯 이름
+python test_stability.py     # 판정: 0/360 경계, 윈도우 경계, 움직임 거부
+python test_eink_panel.py    # 패널: 상태→화면, 갱신 예약, 다섯 화면 렌더링
 ```
 
-## 구성
-
-**운영 (루트)**
-
-| 파일 | 역할 |
-|---|---|
-| `recorder.py` | 기록 루프와 상태 기계. systemd가 띄우는 것 |
-| `ahrs_file.py` | `.dat` 포맷 — 읽기·쓰기·복구·병합 |
-| `stability.py` | 안정화 판정 |
-| `filestore.py` | 파일 목록·연속 그룹·휴지통 |
-| `web/` | 운영자 웹 (Flask, 8080) |
-| `eink_panel.py` | e-paper 화면 |
-| `read_status.py` | 센서 연결·상태 읽기 **(recorder가 사용)** |
-| `hwt9037_485.py` | 장치 모델 (Modbus) |
-| `port_config.py` | 시리얼 포트 결정 |
-| `app_config.py` | 설정·PIN·로그 (`config.json`) |
-| `gdey0154d67.py` | e-paper 드라이버 |
-
-**개발자 (`dev/`)**
-
-| 파일 | 역할 |
-|---|---|
-| `devmode.sh` | 서비스를 멈추고 도구를 실행한 뒤 되살림 |
-| `ahrsbin_to_csv.py` | `.dat` → CSV 변환 |
-| `dashboard.py`, `pages/setup.py` | Streamlit 분석 대시보드 |
-| `analyze_tilt.py` | CSV 분석 (통계·FFT) |
-| `log_tilt.py` | CSV 직접 기록 (구형) |
-| `configure_sensor.py` | 센서 설정 (6축 알고리즘, baud) |
-| `eink_status.py`, `eink_test.py` | 패널 시험 도구 |
-| `test.py` | 대시보드 자가 점검 |
-| `verticrane-dashboard.service` | 옛 운영 서비스. 참고용으로만 남겨 둠 |
-| `install_requirements.bat` | Windows 개발 환경 설치 |
-
-## 자가 점검
+### 장비에서
 
 ```bash
-python test_ahrs_file.py     # 포맷: 쓰기 → 자르기 → 복구 → 병합 (하드웨어 불필요)
-python test_stability.py     # 판정: 0/360 경계, 윈도우, 움직임 거부
-./test.sh                    # 위 둘 + 센서 점검
+./test.sh                    # 위 셋 + 센서 통신 점검
 ```
+
+### 손으로 확인해야 하는 것
+
+| 확인할 것 | 방법 |
+|---|---|
+| 접속 없으면 자동 기록 | 인자 없이 띄우고 2분 건드리지 않는다 → `recording` |
+| 접속하면 대기 | 60초 안에 `/api/status`를 부른다 → `maintenance` |
+| 안정화 판정 | 기록 중 흔든다 → 로그에 사유, 블록에 플래그 |
+| **전원 차단 복구** | 기록 중 **전원을 뽑는다** → 다음 부팅에서 `.partial`이 떨어지고 헤더에 복구 표식 |
+| 경로 검증 | `/api/files/../../etc/passwd` → 404 |
+
+전원 차단은 **정상 종료로는 그 경로를 타지 않습니다.** 반드시 케이블을 뽑으세요.
 
 ---
 
-# 문제 해결
+## 10. 문제 해결
 
-- **기록이 시작되지 않음** — 웹 상태 화면의 안정화 판정 표를 보세요. 어느 지표가
-  기준을 넘었는지 나옵니다. 장비가 흔들리거나 제대로 안착되지 않은 경우가 대부분입니다.
-- **파일 이름이 `UNSET_`으로 시작** — 설정 화면에서 설치 위치를 지정하세요.
-- **시각이 이상함** — 네트워크가 없는 곳에서 켜면 시계가 전원이 꺼져 있던 시간만큼
-  뒤처집니다. 장비는 그것을 알 방법이 없어 고치지 않습니다. **데이터는 온전하고,
-  파일 안의 상대 시간(기록 시작 후 몇 초)은 어느 경우에도 정확합니다.** 순서도
-  맞습니다. 절대 시각이 중요하면 차량 WiFi가 닿는 곳에서 한 번 켠 뒤 옮기세요.
-- **`ModuleNotFoundError: pymodbus`** — 시스템 `python`으로 실행한 경우입니다.
-  `.venv/bin/python`을 쓰세요.
-- **`/dev/serial0`이 없음** — 위 **0. 시리얼 포트 열기**를 실행하고 재부팅하세요.
-- **센서 연결 실패** — 기록기가 포트를 쓰고 있지 않은지(`devmode.sh` 사용),
-  `dialout` 그룹에 들어 있는지, 8·10번 핀 결선과 RS-485 A/B 극성을 확인하세요.
-- **e-paper 한글이 네모로 나옴** — `sudo apt install -y fonts-nanum`.
-- **`.local` 주소로 접속이 안 됨** — 통신사 DNS가 없는 도메인에 엉뚱한 주소를
-  돌려주면서 mDNS 응답이 묻힙니다. 장비 쪽 avahi는 정상입니다. **IP를 쓰세요.**
-- **WiFi가 바뀌어 장비에 아예 접속할 수 없음** — 화면도 키보드도 없어 SSH도 못 들어갑니다.
-  **블루투스로 Wi-Fi를 다시 붙일 수 있습니다** — [bt/INTEGRATION.md](bt/INTEGRATION.md).
-- **웹이 응답하는지 빠르게 보기** — `curl localhost:8080/healthz`. 이 요청은
-  운영자 접속으로 세지 않으므로 자동 기록을 막지 않습니다.
+### `ModuleNotFoundError: pymodbus`
+
+시스템 `python`으로 실행한 경우입니다. `.venv/bin/python`을 쓰세요.
+
+### `/dev/serial0`이 없음
+
+[3. 설치](#3-설치)의 시리얼 포트 열기를 실행하고 재부팅하세요.
+
+### 센서 연결 실패
+
+- 기록기가 포트를 쓰고 있지 않은지 (`devmode.sh` 사용)
+- `dialout` 그룹에 들어 있는지 (`usermod` 후 재로그인 필요)
+- 8·10번 핀(GPIO14/15) 결선과 RS-485 A/B 극성
+
+### e-paper가 안 그려짐
+
+- `dtparam=spi=on`이 `/boot/firmware/config.txt`에 있는지
+- `spi` / `gpio` 그룹에 들어 있는지
+- 한글이 네모로 나오면 `sudo apt install -y fonts-nanum`
+
+**패널이 없어도 기록은 계속됩니다.** 로그에 경고만 남습니다.
+
+### `.local` 주소로 접속이 안 됨
+
+통신사 DNS가 없는 도메인에 엉뚱한 주소를 돌려주면서 mDNS 응답이 묻힙니다
+(실측에서 `218.38.137.28`로 해석됐습니다). 장비 쪽 avahi는 정상입니다.
+**IP를 쓰세요.**
+
+### WiFi가 바뀌어 아예 접속할 수 없음
+
+화면도 키보드도 없어 SSH도 못 들어갑니다. **블루투스로 Wi-Fi를 다시 붙일 수
+있습니다** — [bt/README.md](bt/README.md). 그래서 `disable-bt`가 아니라
+`miniuart-bt`를 씁니다.
+
+### 웹이 응답하는지 빠르게 보기
+
+```bash
+curl localhost:8080/healthz
+```
+
+이 요청은 운영자 접속으로 세지 않으므로 자동 기록을 막지 않습니다.
 
 > **무응답 감시(워치독)는 두지 않았습니다.** HTTP 응답 확인은 이 시스템에서
-> 잘못된 지표입니다 — 웹과 기록이 별도 스레드라, 기록이 멈춰도 웹은 200을
-> 돌려주고 반대로 웹만 막히면 멀쩡한 기록을 재시작해 버립니다. systemd의
+> 잘못된 지표입니다 — 웹과 기록이 별도 스레드라 기록이 멈춰도 웹은 200을
+> 돌려주고, 반대로 웹만 막히면 멀쩡한 기록을 재시작해 버립니다. systemd의
 > `Restart=always`가 프로세스 사망만 처리합니다.
+
+### 부팅이 느림
+
+전원에서 첫 화면까지 약 11초입니다. 그보다 오래 걸리면:
+
+```bash
+systemd-analyze
+systemd-analyze critical-chain verticrane-recorder.service
+```
+
+`install.sh`가 cloud-init을 끄고(`/etc/cloud/cloud-init.disabled`), 유닛에서
+`After=network.target`을 뺍니다. 둘 다 되돌리면 10초가 더 붙습니다.
