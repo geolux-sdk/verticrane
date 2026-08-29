@@ -221,6 +221,116 @@ def compare_captures(path_a: str, path_b: str) -> int:
     return 0
 
 
+def _load_series(path: str) -> Optional[tuple[list[list[float]], list[list[float]],
+                                               list[float]]]:
+    hw: list[list[float]] = []
+    sc: list[list[float]] = []
+    ts: list[float] = []
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                hw.append([float(row["hw_accx"]), float(row["hw_accy"]),
+                           float(row["hw_accz"])])
+                sc.append([float(row["scl_accx"]), float(row["scl_accy"]),
+                           float(row["scl_accz"])])
+                ts.append(float(row["t"]))
+            except (KeyError, ValueError):
+                continue
+    return (hw, sc, ts) if hw else None
+
+
+def _dominant_axis(vectors: list[list[float]]) -> list[float]:
+    """Signed deviation along the direction the motion actually used, in mg.
+
+    Projecting onto one axis rather than taking the vector's length keeps the
+    sign, and sign is what a frequency estimate needs -- a magnitude rectifies
+    the waveform and doubles every frequency read off it.
+    """
+    centre = [mean([v[k] for v in vectors]) for k in range(3)]
+    dev = [[v[k] - centre[k] for k in range(3)] for v in vectors]
+    axis = [1.0, 0.0, 0.0]
+    for _ in range(100):                       # power iteration on the covariance
+        nxt = [0.0, 0.0, 0.0]
+        for d in dev:
+            dot = sum(d[k] * axis[k] for k in range(3))
+            for k in range(3):
+                nxt[k] += dot * d[k]
+        scale = math.sqrt(sum(x * x for x in nxt))
+        if scale == 0.0:
+            break
+        axis = [x / scale for x in nxt]
+    return [sum(d[k] * axis[k] for k in range(3)) * 1000.0 for d in dev]
+
+
+def _crossing_rate(signal: list[float], seconds: float) -> float:
+    """Dominant frequency from mean crossings. Crude, and enough for a hand shake."""
+    if seconds <= 0.0:
+        return 0.0
+    mid = mean(signal)
+    crossings = sum(1 for i in range(1, len(signal))
+                    if (signal[i - 1] - mid) * (signal[i] - mid) < 0.0)
+    return crossings / 2.0 / seconds
+
+
+def shake_response(paths: list[str]) -> int:
+    """Amplitude ratio against shake frequency -- the HWT9037's filter, measured.
+
+    One capture per frequency. Each sensor's motion is projected onto the axis
+    the shaking used, the frequency comes off the crossing rate, and the ratio
+    of the two amplitudes is one point of a Bode plot. Where the ratio is near
+    1 the HWT9037 is keeping up; where it climbs, it is not.
+
+    The capture has to be shaken hard enough that both sensors are well clear
+    of their noise floors -- the HWT9037's LSB is 0.488 mg, so anything under a
+    few mg of amplitude measures quantisation and not the filter. That is why
+    the brief knock recorded earlier could not do this.
+    """
+    rows: list[tuple[float, float, float, float, str]] = []
+    for path in paths:
+        loaded = _load_series(path)
+        if loaded is None:
+            logger.error("no usable rows in {}", path)
+            continue
+        hw_v, sc_v, ts = loaded
+        seconds = ts[-1] - ts[0] if len(ts) > 1 else 0.0
+        hw, sc = _dominant_axis(hw_v), _dominant_axis(sc_v)
+        hw_rms, sc_rms = stdev(hw), stdev(sc)
+        freq = _crossing_rate(sc, seconds)     # the SCL3300 sees the real motion
+        rows.append((freq, hw_rms, sc_rms, seconds, path))
+
+    if not rows:
+        return 1
+    rows.sort()
+    print("\n  Shake response -- amplitude against frequency")
+    print("    {:>8} {:>11} {:>11} {:>9}  {}".format(
+        "freq", "HWT9037", "SCL3300", "ratio", "capture"))
+    print("    {:>8} {:>11} {:>11} {:>9}".format("(Hz)", "(mg rms)", "(mg rms)", "SCL/HWT"))
+    print("    " + "-" * 58)
+    # Clearing the LSB is not enough: at one or two counts the amplitude is
+    # mostly quantisation and the ratio is meaningless. Ten counts is the point
+    # where the reading is the motion rather than the grid it lands on.
+    floor_mg = _HWT_RESOLUTION_MG * 10.0
+    weak = 0
+    for freq, hw_rms, sc_rms, seconds, path in rows:
+        ratio = sc_rms / hw_rms if hw_rms > 0 else float("inf")
+        note = ""
+        if hw_rms < floor_mg:
+            note = "  <- too weak ({:.0f}x LSB)".format(hw_rms / _HWT_RESOLUTION_MG)
+            weak += 1
+        print("    {:>8.2f} {:>11.3f} {:>11.3f} {:>9.1f}  {}{}".format(
+            freq, hw_rms, sc_rms, ratio, os.path.basename(path), note))
+    print("\n    A ratio near 1 means the HWT9037 is keeping up; a ratio that")
+    print("    climbs with frequency is the filter.")
+    if weak:
+        print("\n    {} of {} captures sit under {:.1f} mg, ten counts of the".format(
+            weak, len(rows), floor_mg))
+        print("    HWT9037's LSB. Those rows measure the quantisation grid, not")
+        print("    the response, and their frequency is a noise crossing rate")
+        print("    rather than a shake. Shake harder -- several degrees -- and")
+        print("    repeat them.")
+    return 0
+
+
 def read_hwt(device) -> Optional[tuple[tuple[float, float, float],
                                        tuple[float, float, float]]]:
     if device.readReg(*ANGLE_BLOCK) is None:
@@ -411,11 +521,16 @@ def main() -> int:
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"), default=None,
                     help="two earlier --csv captures of settled poses; report "
                          "the rotation each sensor saw between them and stop")
+    ap.add_argument("--shake", nargs="+", metavar="CSV", default=None,
+                    help="captures of the assembly being shaken, one per "
+                         "frequency; report amplitude against frequency and stop")
     args = ap.parse_args()
 
     # Both ends are already recorded, so this needs no sensors and no wait.
     if args.compare:
         return compare_captures(args.compare[0], args.compare[1])
+    if args.shake:
+        return shake_response(args.shake)
 
     port = port_config.resolve_port(getattr(args, "port", None))
     device, baud = read_status.connectAutoBaud(port)
