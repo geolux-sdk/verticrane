@@ -68,9 +68,13 @@ TEMP_REG = (0x43, 1)
 
 # Below this the reference orientation's own error swamps a scale measurement.
 SCALE_TILT_MIN_DEG = 15.0
-# How far apart two captures of the same "settled" pose land minutes apart,
-# measured on this bench. It is the floor under any scale figure.
-_REFERENCE_ERROR_DEG = 0.11
+# How far apart two captures of the same "settled" pose land minutes apart. A
+# still bench gives 0.11 deg, but that understates it: three independent
+# level-to-tilted pairs measuring the same 12-14 deg rotation returned scale
+# ratios of +2.15, -0.70 and +0.33 %, a spread only an endpoint error of about
+# this size explains. Handling the assembly between poses costs more than
+# letting it sit. It is the floor under any scale figure.
+_REFERENCE_ERROR_DEG = 0.25
 
 # The HWT9037 is stuck at the 16 g range on this unit, so its accelerometer
 # resolution is fixed. The SCL3300's depends on the mode.
