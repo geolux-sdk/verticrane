@@ -331,6 +331,85 @@ def shake_response(paths: list[str]) -> int:
     return 0
 
 
+def sweep_response(path: str, window_s: float = 4.0) -> int:
+    """Frequency response from one continuous recording of a varying shake.
+
+    The three-captures-at-three-rhythms version needs whoever is shaking to
+    follow a clock, and getting that wrong quietly puts two frequencies in one
+    file. This asks for nothing but a shake that changes speed: slide a window
+    over the recording, read each window's frequency off its own crossing rate,
+    and let the windows sort themselves into frequency bins afterwards. Many
+    points instead of three, and no coordination at all.
+
+    The projection axis is fixed once over the whole recording rather than per
+    window. A window of near-stillness has no dominant direction of its own,
+    and letting it choose one would point it at whatever the noise did.
+    """
+    loaded = _load_series(path)
+    if loaded is None:
+        logger.error("no usable rows in {}", path)
+        return 1
+    hw_v, sc_v, ts = loaded
+    hw, sc = _dominant_axis(hw_v), _dominant_axis(sc_v)
+    rate = (len(ts) - 1) / (ts[-1] - ts[0]) if len(ts) > 1 else 25.0
+    width = max(8, int(window_s * rate))
+    step = max(1, width // 2)
+    floor_mg = _HWT_RESOLUTION_MG * 10.0
+
+    # (frequency, hwt amplitude, scl amplitude) for every window that was
+    # actually shaken hard enough to mean something.
+    points: list[tuple[float, float, float]] = []
+    weak = 0
+    for start in range(0, len(hw) - width + 1, step):
+        h = hw[start:start + width]
+        s = sc[start:start + width]
+        h_rms, s_rms = stdev(h), stdev(s)
+        if h_rms < floor_mg:
+            weak += 1
+            continue
+        points.append((_crossing_rate(s, width / rate), h_rms, s_rms))
+
+    print("\n  Frequency response from a swept shake")
+    print("    {}, {:.0f} s at {:.1f} Hz, {:.1f} s windows".format(
+        os.path.basename(path), ts[-1] - ts[0], rate, width / rate))
+    if not points:
+        print("\n    Nothing in this recording clears {:.1f} mg, ten counts of".format(
+            floor_mg))
+        print("    the HWT9037's LSB. Every window measures the quantisation")
+        print("    grid rather than a response. Shake several degrees, not a")
+        print("    nudge, and record again.")
+        return 1
+
+    # Octave-ish bins: wide enough to hold several windows, narrow enough that
+    # a filter's roll-off does not average away inside one.
+    edges = [0.0, 0.35, 0.7, 1.4, 2.8, 5.6, 12.5]
+    print("\n    {:>12} {:>9} {:>11} {:>11} {:>9}".format(
+        "band (Hz)", "windows", "HWT9037", "SCL3300", "ratio"))
+    print("    {:>12} {:>9} {:>11} {:>11} {:>9}".format(
+        "", "", "(mg rms)", "(mg rms)", "SCL/HWT"))
+    print("    " + "-" * 56)
+    shown = 0
+    for lo, hi in zip(edges, edges[1:]):
+        got = [p for p in points if lo <= p[0] < hi]
+        if not got:
+            continue
+        shown += 1
+        h_avg = mean([p[1] for p in got])
+        s_avg = mean([p[2] for p in got])
+        print("    {:>12} {:>9} {:>11.3f} {:>11.3f} {:>9.2f}".format(
+            "{:.2f}-{:.2f}".format(lo, hi), len(got), h_avg, s_avg,
+            s_avg / h_avg if h_avg else float("inf")))
+
+    print("\n    {} windows used, {} skipped as too weak.".format(len(points), weak))
+    if shown < 2:
+        print("    Only one band was shaken. A response needs at least two, so")
+        print("    record again and vary the speed more widely.")
+        return 1
+    print("    A ratio near 1 is the HWT9037 keeping up. Where the ratio starts")
+    print("    climbing is its corner; the SCL3300 is the flat reference here.")
+    return 0
+
+
 def read_hwt(device) -> Optional[tuple[tuple[float, float, float],
                                        tuple[float, float, float]]]:
     if device.readReg(*ANGLE_BLOCK) is None:
@@ -524,6 +603,11 @@ def main() -> int:
     ap.add_argument("--shake", nargs="+", metavar="CSV", default=None,
                     help="captures of the assembly being shaken, one per "
                          "frequency; report amplitude against frequency and stop")
+    ap.add_argument("--sweep", metavar="CSV", default=None,
+                    help="one continuous capture of a shake whose speed varies; "
+                         "bin it by frequency and report the response, then stop")
+    ap.add_argument("--window", type=float, default=4.0,
+                    help="seconds per analysis window for --sweep")
     args = ap.parse_args()
 
     # Both ends are already recorded, so this needs no sensors and no wait.
@@ -531,6 +615,8 @@ def main() -> int:
         return compare_captures(args.compare[0], args.compare[1])
     if args.shake:
         return shake_response(args.shake)
+    if args.sweep:
+        return sweep_response(args.sweep, args.window)
 
     port = port_config.resolve_port(getattr(args, "port", None))
     device, baud = read_status.connectAutoBaud(port)
