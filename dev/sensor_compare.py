@@ -66,6 +66,12 @@ import scl3300
 ANGLE_BLOCK = (0x34, 15)
 TEMP_REG = (0x43, 1)
 
+# Below this the reference orientation's own error swamps a scale measurement.
+SCALE_TILT_MIN_DEG = 15.0
+# How far apart two captures of the same "settled" pose land minutes apart,
+# measured on this bench. It is the floor under any scale figure.
+_REFERENCE_ERROR_DEG = 0.11
+
 # The HWT9037 is stuck at the 16 g range on this unit, so its accelerometer
 # resolution is fixed. The SCL3300's depends on the mode.
 _HWT_RESOLUTION_MG = 16.0 / 32768.0 * 1000.0
@@ -320,11 +326,25 @@ def report(hwt: Column, scl: Column, elapsed: float, rate: float,
             ms / mh, (ms / mh - 1.0) * 100.0))
     print("    RMS disagreement       {:.4f} deg".format(rms))
     print("    worst disagreement     {:.4f} deg".format(max(diff)))
+
+    # A scale error is a ratio, so the reference orientation's own error
+    # divides straight into it. The bench wanders about a tenth of a degree
+    # between captures minutes apart, which at a small tilt is the whole
+    # answer -- quote the resulting uncertainty rather than a percentage that
+    # cannot support its own digits.
+    if 1.0 < mh < SCALE_TILT_MIN_DEG:
+        print("\n    At {:.1f} deg this scale figure is +/-{:.1f} % before the".format(
+            mh, _REFERENCE_ERROR_DEG / mh * 100.0))
+        print("    sensors are even involved, because a {:.2f} deg reference".format(
+            _REFERENCE_ERROR_DEG))
+        print("    error divides into it. Tilt to {:.0f} deg and it falls to "
+              "+/-{:.1f} %.".format(SCALE_TILT_MIN_DEG,
+                                    _REFERENCE_ERROR_DEG / SCALE_TILT_MIN_DEG * 100.0))
     if moved < 1.0:
         # Without motion the two tilt tracks are both flat, so they agree
         # trivially. Saying so matters more than the number above.
         print("\n    The assembly barely moved, so this only compares noise.")
-        print("    Tilt it through 10-20 deg during the run to test scale.")
+        print("    Tilt it through {:.0f} deg to test scale.".format(SCALE_TILT_MIN_DEG))
     elif rms > 0.5:
         print("\n    They disagree by more than noise. Either the two are not")
         print("    rigid with respect to each other, or one of them is wrong.")
