@@ -143,6 +143,34 @@ class Column:
         self.tilt = [angle_between(a, self.reference) for a in self.acc]
 
 
+def load_baseline(path: str) -> Optional[tuple[tuple[float, float, float],
+                                                tuple[float, float, float]]]:
+    """Mean acceleration per sensor from an earlier capture.
+
+    Measuring scale by sweeping the assembly through a tilt by hand works, but
+    two settled poses work better: averaging a whole capture at each end drives
+    the noise on the difference down by the square root of the sample count,
+    and neither end is smeared by the motion itself. This is the far pose's
+    view of the near one.
+    """
+    hw: list[tuple[float, float, float]] = []
+    sc: list[tuple[float, float, float]] = []
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                hw.append((float(row["hw_accx"]), float(row["hw_accy"]),
+                           float(row["hw_accz"])))
+                sc.append((float(row["scl_accx"]), float(row["scl_accy"]),
+                           float(row["scl_accz"])))
+            except (KeyError, ValueError):
+                continue
+    if not hw:
+        return None
+    avg = lambda v: (mean([a[0] for a in v]), mean([a[1] for a in v]),  # noqa: E731
+                     mean([a[2] for a in v]))
+    return avg(hw), avg(sc)
+
+
 def read_hwt(device) -> Optional[tuple[tuple[float, float, float],
                                        tuple[float, float, float]]]:
     if device.readReg(*ANGLE_BLOCK) is None:
@@ -281,7 +309,15 @@ def report(hwt: Column, scl: Column, elapsed: float, rate: float,
     diff = [abs(hwt.tilt[i] - scl.tilt[i]) for i in range(n)]
     moved = max(max(hwt.tilt[:n]), max(scl.tilt[:n]))
     rms = math.sqrt(sum(d * d for d in diff) / n)
+    mh, ms = mean(hwt.tilt[:n]), mean(scl.tilt[:n])
     print("    largest tilt seen      {:.3f} deg".format(moved))
+    print("    mean tilt, HWT9037     {:.4f} deg".format(mh))
+    print("    mean tilt, SCL3300     {:.4f} deg".format(ms))
+    if mh > 1.0:
+        # Against a settled pose the pair of means is the measurement, and the
+        # ratio is the scale error -- a figure the sweep version cannot give.
+        print("    scale, SCL / HWT       {:.4f}  ({:+.2f} %)".format(
+            ms / mh, (ms / mh - 1.0) * 100.0))
     print("    RMS disagreement       {:.4f} deg".format(rms))
     print("    worst disagreement     {:.4f} deg".format(max(diff)))
     if moved < 1.0:
@@ -303,6 +339,9 @@ def main() -> int:
                     help="SCL3300 measurement mode")
     ap.add_argument("--reference-samples", type=int, default=20,
                     help="opening samples averaged into the reference orientation")
+    ap.add_argument("--baseline", default="",
+                    help="take the reference orientation from an earlier --csv "
+                         "instead, so this run measures the rotation since then")
     ap.add_argument("--csv", default="", help="write every sample here")
     ap.add_argument("--quiet", action="store_true", help="summary only")
     args = ap.parse_args()
@@ -405,8 +444,16 @@ def main() -> int:
     if not hwt_col.acc:
         logger.error("no paired samples were collected")
         return 1
-    hwt_col.set_reference(args.reference_samples)
-    scl_col.set_reference(args.reference_samples)
+    if args.baseline:
+        base = load_baseline(args.baseline)
+        if base is None:
+            logger.error("no usable rows in {}", args.baseline)
+            return 1
+        hwt_col.reference, scl_col.reference = base
+        logger.info("reference orientation taken from {}", args.baseline)
+    else:
+        hwt_col.set_reference(args.reference_samples)
+        scl_col.set_reference(args.reference_samples)
     hwt_col.compute_tilt()
     scl_col.compute_tilt()
     report(hwt_col, scl_col, elapsed,
