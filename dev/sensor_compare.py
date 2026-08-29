@@ -149,7 +149,71 @@ def read_hwt(device) -> Optional[tuple[tuple[float, float, float],
     return acc, ang                                       # type: ignore[return-value]
 
 
-def report(hwt: Column, scl: Column, elapsed: float, rate: float) -> None:
+def block_average(xs: list[float], n: int) -> list[float]:
+    return [sum(xs[i:i + n]) / n for i in range(0, len(xs) - n + 1, n)]
+
+
+def averaging_table(hwt: Column, scl: Column, rate: float) -> None:
+    """Sigma against averaging window -- the only fair way to read the noise.
+
+    Comparing raw sigma tells you which output is more filtered, not which
+    sensor is better. Averaging separates the two: genuine white noise falls as
+    1/sqrt(N), while an output that has already been smoothed to its floor
+    barely moves however much you average it, because its samples are no longer
+    independent. Read each row against the ideal beneath it.
+    """
+    windows = [n for n in (1, 2, 5, 10, 25, 50, 100) if len(hwt.acc) // n >= 8]
+    if len(windows) < 2:
+        return
+    print("\n  Noise against averaging window -- sigma of AngX/AngY (deg)")
+    print("    {:<16}".format("window (n)")
+          + "".join("{:>9}".format(n) for n in windows))
+    print("    {:<16}".format("bandwidth")
+          + "".join("{:>9}".format("{:.2g}Hz".format(rate / n / 2)) for n in windows))
+    print("    " + "-" * (16 + 9 * len(windows)))
+    for col in (hwt, scl):
+        for i, axis in enumerate("XY"):
+            xs = [a[i] for a in col.ang]
+            line = "    {:<16}".format("{} Ang{}".format(col.name.split("-")[0], axis))
+            for n in windows:
+                b = block_average(xs, n)
+                line += "{:>9}".format("{:.4f}".format(stdev(b)) if len(b) > 1 else "-")
+            print(line)
+            ideal = stdev(xs)
+            print("    {:<16}".format("  ideal 1/sqrtN")
+                  + "".join("{:>9}".format("{:.4f}".format(ideal / math.sqrt(n)))
+                            for n in windows))
+
+
+def disturbances(hwt: Column, scl: Column, times: list[float]) -> None:
+    """Samples where |acc| jumps, and whether both sensors saw the same one.
+
+    A spike one sensor sees alone is that sensor's problem -- a dropped frame,
+    a bad ground. A spike both see within the same moment is the bench being
+    knocked, which is not a fault at all. Telling those apart by eye from a
+    column of numbers is hopeless, so it is done here.
+    """
+    def spikes(col: Column) -> set[int]:
+        m, sd = mean(col.magnitude), stdev(col.magnitude)
+        if sd == 0.0:
+            return set()
+        return {i for i, v in enumerate(col.magnitude) if abs(v - m) > 5.0 * sd}
+
+    a, b = spikes(hwt), spikes(scl)
+    if not a and not b:
+        return
+    shared = sum(1 for i in b if any(abs(times[i] - times[j]) < 0.5 for j in a))
+    print("\n  Disturbances -- |acc| beyond 5 sigma")
+    print("    {:<26}{:>16}{:>16}".format("spikes", len(a), len(b)))
+    print("    {} of the SCL3300's line up with one on the HWT9037".format(shared))
+    if shared >= max(1, len(b) // 2):
+        print("    Both saw the same events, so this is the bench moving, not the bus.")
+    elif b and not shared:
+        print("    The SCL3300 spiked alone. Suspect the wiring before the bench.")
+
+
+def report(hwt: Column, scl: Column, elapsed: float, rate: float,
+           times: list[float]) -> None:
     w = "  {:<26}{:>16}{:>16}"
     print("\n" + "=" * 60)
     print("  {} samples in {:.1f} s ({:.1f} Hz)".format(len(hwt.acc), elapsed, rate))
@@ -184,6 +248,9 @@ def report(hwt: Column, scl: Column, elapsed: float, rate: float) -> None:
         print("\n  Temperature (C)")
         print(w.format("  mean", "{:.2f}".format(mean(hwt.temp)) if hwt.temp else "-",
                        "{:.2f}".format(mean(scl.temp)) if scl.temp else "-"))
+
+    averaging_table(hwt, scl, rate)
+    disturbances(hwt, scl, times)
 
     print("\n  Agreement -- tilt from the run's opening orientation")
     n = min(len(hwt.tilt), len(scl.tilt))
@@ -252,6 +319,7 @@ def main() -> int:
     started = time.monotonic()
     deadline = started + args.seconds
     next_at = started
+    times: list[float] = []
     hw_temp: Optional[float] = None
     next_temp = 0.0
 
@@ -283,6 +351,7 @@ def main() -> int:
                 scl_col.add((r.acc_x, r.acc_y, r.acc_z),
                             (r.angle_x, r.angle_y, r.angle_z), r.temperature)
                 t = now - started
+                times.append(t)
                 if writer is not None:
                     writer.writerow(["{:.4f}".format(t)]
                                     + ["{:.5f}".format(v) for v in hw[0]]
@@ -319,7 +388,8 @@ def main() -> int:
     scl_col.set_reference(args.reference_samples)
     hwt_col.compute_tilt()
     scl_col.compute_tilt()
-    report(hwt_col, scl_col, elapsed, len(hwt_col.acc) / elapsed if elapsed else 0.0)
+    report(hwt_col, scl_col, elapsed,
+           len(hwt_col.acc) / elapsed if elapsed else 0.0, times)
     if args.csv:
         print("\n  samples written to {}".format(args.csv))
     return 0
