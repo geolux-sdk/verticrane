@@ -177,6 +177,46 @@ def load_baseline(path: str) -> Optional[tuple[tuple[float, float, float],
     return avg(hw), avg(sc)
 
 
+def compare_captures(path_a: str, path_b: str) -> int:
+    """Rotation between two settled poses, per sensor, from their captures.
+
+    No hardware and no live run: both ends are already on disk. Each sensor
+    reports the angle between its own averaged acceleration at A and at B, and
+    that angle is the magnitude of the same physical rotation, so the two
+    numbers are directly comparable however the parts are mounted. Their ratio
+    is the scale error -- the one figure a stationary bench cannot produce.
+    """
+    a, b = load_baseline(path_a), load_baseline(path_b)
+    if a is None or b is None:
+        logger.error("could not read both captures")
+        return 1
+    hw = angle_between(a[0], b[0])
+    sc = angle_between(a[1], b[1])
+    print("\n  Rotation between two settled poses")
+    print("    A  {}".format(path_a))
+    print("    B  {}".format(path_b))
+    print("    {:<26}{:>16}{:>16}".format("", "HWT9037-485", "SCL3300"))
+    print("    " + "-" * 56)
+    print("    {:<26}{:>16}{:>16}".format(
+        "rotation (deg)", "{:.3f}".format(hw), "{:.3f}".format(sc)))
+    if hw <= 0.0:
+        return 0
+    print("    {:<26}{:>16}{:>16}".format(
+        "difference (deg)", "", "{:+.3f}".format(sc - hw)))
+    print("    {:<26}{:>16}{:>16}".format(
+        "scale, SCL / HWT", "", "{:+.2f} %".format((sc / hw - 1.0) * 100.0)))
+    band = _REFERENCE_ERROR_DEG / hw * 100.0
+    print("\n    Reference wander of {:.2f} deg puts +/-{:.2f} % under this"
+          .format(_REFERENCE_ERROR_DEG, band))
+    print("    before either sensor is involved.")
+    if abs(sc / hw - 1.0) * 100.0 < band:
+        print("    The measured difference is inside that, so no scale error")
+        print("    is detected at this angle.")
+    elif hw < SCALE_TILT_MIN_DEG:
+        print("    Too small an angle to separate a real scale error from it.")
+    return 0
+
+
 def read_hwt(device) -> Optional[tuple[tuple[float, float, float],
                                        tuple[float, float, float]]]:
     if device.readReg(*ANGLE_BLOCK) is None:
@@ -364,7 +404,14 @@ def main() -> int:
                          "instead, so this run measures the rotation since then")
     ap.add_argument("--csv", default="", help="write every sample here")
     ap.add_argument("--quiet", action="store_true", help="summary only")
+    ap.add_argument("--compare", nargs=2, metavar=("A", "B"), default=None,
+                    help="two earlier --csv captures of settled poses; report "
+                         "the rotation each sensor saw between them and stop")
     args = ap.parse_args()
+
+    # Both ends are already recorded, so this needs no sensors and no wait.
+    if args.compare:
+        return compare_captures(args.compare[0], args.compare[1])
 
     port = port_config.resolve_port(getattr(args, "port", None))
     device, baud = read_status.connectAutoBaud(port)
