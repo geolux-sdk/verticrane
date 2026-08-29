@@ -250,26 +250,21 @@ class SCL3300:
 
     # --- lifecycle ---------------------------------------------------------
 
-    def _prime(self) -> None:
-        """Clock out the frames the device emits before it owes anyone an answer.
-
-        Straight after power-up the responses come back with a good CRC but the
-        wrong register echoed, so the first real request would be answered by
-        one of them. Throw a couple away and the pipeline starts from a known
-        place.
-        """
-        for _ in range(2):
-            self._frame(request(REG_STATUS))
-
     def start(self, settle_s: float = 0.1) -> None:
         """Reset, select the mode, enable the angle outputs, clear the flags.
 
         The default settle is deliberately longer than the datasheet minimum:
         this runs once, and a short wait here shows up as a bogus first sample.
         """
-        self._prime()
-        self.write_register(REG_CMD, _CMD_SW_RESET)
+        # The reset wipes the device's own frame pipeline, so the answer that
+        # would ride out in the following frame is post-reset noise rather than
+        # a response to anything. Send it raw and clock one throwaway frame
+        # after it, or the checked path below reports an echo mismatch that
+        # means nothing.
+        self._frame(request(REG_CMD, _CMD_SW_RESET, write=True))
         time.sleep(0.003)
+        self._frame(request(REG_STATUS))
+
         self.write_register(REG_CMD, self._mode)
         self.write_register(REG_ANG_CTRL, _ANG_CTRL_ENABLE)
         time.sleep(settle_s)
