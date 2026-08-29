@@ -15,6 +15,14 @@
 # arbitration beyond the kernel's own per-controller lock. Keep this SpiDev
 # instance separate from the panel's -- one object per chip select, never shared.
 #
+# Sharing costs almost nothing, which is worth recording because it looks like it
+# should cost a lot. Reading at 100 Hz through three full panel refreshes: 2000
+# samples, 100.0 Hz held, no CRC errors, worst loop gap 11.5 ms against 10.1 ms
+# with the bus to ourselves. A refresh takes 1.4 s but spends only about 10 ms of
+# it clocking pixels -- the rest is the panel holding BUSY high with the bus
+# idle, so there is little to collide with and no reason to shrink the panel's
+# transfer chunks.
+#
 # Two things about the SCL3300 protocol drive the shape of this module:
 #
 #   * Every exchange is exactly 32 bits: RW(1) ADDR(5) RS(2) DATA(16) CRC(8),
