@@ -35,6 +35,15 @@
 #                           but only if the assembly is actually tilted during
 #                           the run, and only if the two are rigid with
 #                           respect to each other.
+#
+# What the first runs found, so nobody has to rediscover it. The HWT9037's angle
+# output does not average down at all -- 0.0070 deg at a window of one sample and
+# 0.0070 deg at a hundred -- which means consecutive samples carry no independent
+# information and the figure is its filter's floor, not its noise. It also reads
+# an |acc| sigma five times below its own quantisation step, which is impossible
+# for anything unfiltered. The SCL3300 tracks 1/sqrt(N) down to about 0.005 deg,
+# so the two meet near a 2.5 Hz bandwidth and the SCL3300 is the better of the
+# two below that. Raw sigma alone says the opposite, and is wrong.
 
 from __future__ import annotations
 
