@@ -23,7 +23,8 @@
       "Bash(ssh pi@192.168.0.19 *)",
       "Bash(python -c \"import app_config; print\\('임포트 OK'\\)\")",
       "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1|tail -1 && sudo cp bt/systemd/pi-bt-wifi-setup.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart pi-bt-wifi-setup && sleep 4 && journalctl -u pi-bt-wifi-setup --since \"-15s\" --no-pager | grep -E \"ADV|어댑터\" | head -4')",
-      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1|tail -1 && ./test.sh 2>&1 | grep -E \"통과$|전부|FAIL\" | tail -6 && sudo systemctl restart verticrane-recorder')"
+      "Bash(ssh pi@192.168.0.19 'cd ~/verticrane && ./update.sh 2>&1|tail -1 && ./test.sh 2>&1 | grep -E \"통과$|전부|FAIL\" | tail -6 && sudo systemctl restart verticrane-recorder')",
+      "Bash(python test_scl3300.py)"
     ]
   }
 }

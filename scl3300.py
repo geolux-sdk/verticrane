@@ -250,22 +250,36 @@ class SCL3300:
 
     # --- lifecycle ---------------------------------------------------------
 
+    def _prime(self) -> None:
+        """Clock out the frames the device emits before it owes anyone an answer.
+
+        Straight after power-up the responses come back with a good CRC but the
+        wrong register echoed, so the first real request would be answered by
+        one of them. Throw a couple away and the pipeline starts from a known
+        place.
+        """
+        for _ in range(2):
+            self._frame(request(REG_STATUS))
+
     def start(self, settle_s: float = 0.1) -> None:
         """Reset, select the mode, enable the angle outputs, clear the flags.
 
         The default settle is deliberately longer than the datasheet minimum:
         this runs once, and a short wait here shows up as a bogus first sample.
         """
+        self._prime()
         self.write_register(REG_CMD, _CMD_SW_RESET)
         time.sleep(0.003)
         self.write_register(REG_CMD, self._mode)
         self.write_register(REG_ANG_CTRL, _ANG_CTRL_ENABLE)
         time.sleep(settle_s)
 
-        # The status register latches faults; reading it clears them. The first
-        # read still carries the startup flags, so it is the second that means
-        # anything.
-        self.read_register(REG_STATUS)
+        # Reading a fault register clears it, and everything latched at this
+        # point belongs to the reset above -- on this part ERR_FLAG2 comes up
+        # 0x0210. Clear all three before the check, or the first status() a
+        # caller makes reports a fault that is already history.
+        self._exchange([request(REG_STATUS), request(REG_ERR_FLAG1),
+                        request(REG_ERR_FLAG2)])
         status = self.read_register(REG_STATUS)
         if status.rs != RS_NORMAL:
             raise SCL3300Error(
