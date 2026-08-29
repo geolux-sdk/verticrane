@@ -215,7 +215,19 @@ def disturbances(hwt: Column, scl: Column, times: list[float]) -> None:
     print("\n  Disturbances -- |acc| beyond 5 sigma")
     print("    {:<26}{:>16}{:>16}".format("spikes", len(a), len(b)))
     print("    {} of the SCL3300's line up with one on the HWT9037".format(shared))
-    if shared >= max(1, len(b) // 2):
+
+    # One sensor can only corroborate the other's spike if it can resolve one.
+    # A device whose sigma sits well under its own quantisation step has been
+    # smoothed past the point of reporting short events at all, so its silence
+    # is not evidence -- reading it as evidence blames the wiring for a spike
+    # that was really the floor.
+    blind = [c for c in (hwt, scl)
+             if stdev(c.magnitude) * 1000.0 < c.resolution_mg / 4.0]
+    if blind:
+        print("    {} cannot resolve one: its sigma is under a quarter of its own"
+              .format(", ".join(c.name for c in blind)))
+        print("    LSB, so it has nothing to say about the other's spikes.")
+    elif shared >= max(1, len(b) // 2):
         print("    Both saw the same events, so this is the bench moving, not the bus.")
     elif b and not shared:
         print("    The SCL3300 spiked alone. Suspect the wiring before the bench.")
