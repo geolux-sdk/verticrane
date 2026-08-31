@@ -12,3 +12,8 @@ data/
 
 # Local per-machine Claude Code settings
 .claude/settings.local.json
+
+# Windows 실행 파일 빌드 산출물 (bt/web/build_exe.py 로 언제든 다시 만듭니다)
+bt/web/build/
+bt/web/dist/
+bt/web/icons/app.ico

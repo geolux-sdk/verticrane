@@ -12,6 +12,8 @@
 | `sw.js` | 서비스워커 — 앱 셸 오프라인 캐시 |
 | `icons/` | 앱 아이콘 (192·512·maskable PNG) |
 | `serve.py` | 개발·최초 설치용 정적 서버 (ThreadingHTTPServer) |
+| `launcher.py` | 실행 파일용 런처 — 서버 + 브라우저 실행 + 종료까지 |
+| `build_exe.py` | `launcher.py` 와 자산을 `VerticraneBT.exe` 로 굽는다 |
 
 ## 지원 범위
 
@@ -24,11 +26,51 @@
 > Web Bluetooth 는 **보안 컨텍스트**(https / localhost)에서만 동작. `file://` 로 열면 안 됨
 > (기억된 기기 권한도 file:// 에선 저장 안 됨).
 
-## 실행 (데스크톱)
+## 실행 파일 (현장 노트북용)
+
+파이썬도, 명령줄도, Chrome 플래그 설정도 필요 없는 배포 형태다. **`VerticraneBT.exe`
+를 더블클릭하면 앱 창이 뜨고, 그 창을 닫으면 끝난다.**
+
+```bash
+pip install pyinstaller pillow     # 굽는 PC 에만 필요
+python build_exe.py                # → dist/VerticraneBT.exe  (약 8.4 MB)
+python build_exe.py --clean        # build/ dist/ 를 지우고 처음부터
+```
+
+`dist/VerticraneBT.exe` 파일 하나를 노트북에 복사하면 된다. 빌드 산출물은
+`.gitignore` 에 있으므로 필요할 때 다시 구우면 된다.
+
+### 실행 파일이 알아서 하는 것
+
+| | 왜 |
+|---|---|
+| Edge 또는 Chrome 을 직접 찾아 실행 | 기본 브라우저가 Firefox 면 Web Bluetooth 가 없어 첫 화면에서 멈춘다 |
+| `--app=` 모드로 표시 | 주소창 없는 독립 창. PWA 설치와 같은 모양이다 |
+| 위의 **Chrome 플래그 두 개**를 명령줄로 켬 | 사용자가 `chrome://flags` 를 뒤지지 않아도 장비 목록이 만들어진다 |
+| 전용 프로필(`%LOCALAPPDATA%\VerticraneBT\browser`) | 플래그는 이미 떠 있는 브라우저에 주면 조용히 무시된다. 전용 프로필이라야 실제로 적용되고, 평소 쓰는 브라우저 설정도 건드리지 않는다 |
+| 포트 8747 고정, `127.0.0.1` 로 접속 | 장비 권한과 기억된 목록은 **출처(origin)** 에 묶인다. 포트가 바뀌면 같은 앱이라도 기억이 사라진다 |
+| 창을 닫으면 서버도 종료 | 창 없는 실행 파일에서 서버만 남아 도는 것을 막는다 |
+
+한 번 허용한 BLE 장비는 그 전용 프로필에 남아 **다음 실행에도 목록에 뜬다.**
+
+### 잘 안 될 때
+
+- 화면 없이 오류 대화상자가 뜨면 그 내용과 `%LOCALAPPDATA%\VerticraneBT\launcher.log`
+  를 본다. 로그는 매 실행마다 새로 쓴다.
+- 8747 이 사용 중이면 8755 까지 위로 옮겨 뜬다. 이때는 **출처가 달라져 기억된 장비
+  목록이 비어 보인다** (로그에 그 사실이 남는다). 8747 을 쓰던 프로그램을 끄고 다시
+  실행하면 목록이 돌아온다.
+- Edge/Chrome 이 아예 없으면 실행되지 않는다. Web Bluetooth 는 Chromium 계열
+  전용이다.
+
+## 실행 (데스크톱, 개발용)
+
+실행 파일을 굽지 않고 소스에서 바로 볼 때 쓴다.
 
 ```bash
 cd web
 python serve.py            # http://localhost:8000
+python launcher.py         # 또는: 브라우저까지 알아서 띄운다
 ```
 
 Chrome/Edge 로 `http://localhost:8000` 접속 → 첫 화면이 **장비 목록** 이다.
