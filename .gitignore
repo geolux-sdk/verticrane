@@ -17,3 +17,6 @@ data/
 bt/web/build/
 bt/web/dist/
 bt/web/icons/app.ico
+
+# dev/fake_card.py 가 만드는 가짜 SD 카드
+dev/_card/
