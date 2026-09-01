@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}파일 · Verticrane 기록기{% endblock %}
+{% block body %}
+
+<div class="card">
+  <h2>카드 안 파일</h2>
+
+  <p class="small muted" style="margin:0 0 14px">
+    {# The list on the status page answers "무엇을 받아 가면 되는가". This one
+       answers "카드에 무엇이 있는가", which is a different question and only
+       gets asked when the first answer looked wrong. #}
+    기록 목록에 나오지 않는 것까지 전부 보입니다 — 휴지통에 들어간 것,
+    읽지 못해 <code>corrupt/</code>로 옮겨진 것, 예전 도구가 남긴 파일.
+    여기서는 <b>받기만</b> 하고 아무것도 치우지 않습니다.
+  </p>
+
+  <p class="small" style="margin:0 0 12px">
+    <a href="{{ url_for('browse') }}">data</a>
+    {% if here %}
+      {% set crumbs = here.split('/') %}
+      {% for part in crumbs %}
+        <span class="muted">/</span>
+        {% if loop.last %}
+          <b>{{ part }}</b>
+        {% else %}
+          <a href="{{ url_for('browse', path=crumbs[:loop.index]|join('/')) }}">{{ part }}</a>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </p>
+
+  {% if not entries %}
+    <p class="muted">이 폴더는 비어 있습니다.</p>
+  {% else %}
+    <div class="wrap"><table>
+      <tr><th>이름</th><th class="num">크기</th><th class="num">수정</th><th></th></tr>
+
+      {% if parent is not none %}
+      <tr>
+        <td colspan="4">
+          <a href="{{ url_for('browse', path=parent) }}">상위 폴더로</a>
+        </td>
+      </tr>
+      {% endif %}
+
+      {% for e in entries %}
+      <tr>
+        <td>
+          {% if e.is_dir %}
+            <a href="{{ url_for('browse', path=e.rel) }}">{{ e.name }}/</a>
+          {% else %}
+            <code style="font-size:13px">{{ e.name }}</code>
+          {% endif %}
+        </td>
+        <td class="num">
+          {% if e.is_dir %}<span class="muted">—</span>
+          {% else %}{{ "%.1f"|format(e.size / 1048576) }} MB{% endif %}
+        </td>
+        <td class="num small muted">{{ e.modified }}</td>
+        <td class="num">
+          {% if not e.is_dir %}
+            {# No collected() call: a download from here is a look, not a
+               collection, and the status page stays the one place that
+               decides what has been handed over. #}
+            <a class="btn" href="/api/raw/{{ e.rel }}" download>받기</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table></div>
+  {% endif %}
+</div>
+
+{% endblock %}

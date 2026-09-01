@@ -61,11 +61,22 @@
   <h2>기록 파일 ({{ stats.files }}개 · {{ "%.1f"|format(stats.bytes / 1048576) }} MB)</h2>
 
   {% if not files %}
-    <p class="muted">
-      {% if stats.trashed %}받을 파일을 모두 가져갔습니다.
-      {% else %}아직 받을 파일이 없습니다.{% endif %}
-      기록이 끝나면 여기에 나타납니다.
-    </p>
+    {# It used to say "받을 파일을 모두 가져갔습니다" whenever the trash held
+       anything. But the trash holds two different things -- files the operator
+       downloaded, and files thrown away because someone connected while a
+       recording was running -- and telling the second story as the first tells
+       an operator they collected something they have never seen. Say what is
+       where, and let them go and look. #}
+    <p class="muted">받을 파일이 없습니다. 기록이 끝나면 여기에 나타납니다.</p>
+    {% if stats.trashed or stats.corrupt %}
+      <p class="small" style="margin:10px 0 0">
+        카드에는 남아 있습니다 —
+        {% if stats.trashed %}휴지통 <b>{{ stats.trashed }}개</b>{% endif %}
+        {%- if stats.trashed and stats.corrupt %},{% endif %}
+        {% if stats.corrupt %}읽지 못한 파일 <b>{{ stats.corrupt }}개</b>{% endif %}.
+        <a href="{{ url_for('browse') }}">파일에서 직접 받을 수 있습니다</a>.
+      </p>
+    {% endif %}
   {% else %}
     <div class="wrap"><table>
       <tr>
@@ -100,9 +111,14 @@
     {% if stats.groups < stats.files %}
       <p class="small muted" style="margin:12px 0 0">
         시간이 이어지는 파일은 하나로 합쳐 받을 수 있습니다:
-        {% for g in files|map(attribute='group')|unique|sort %}
-          <a class="btn" href="/api/groups/{{ g }}" download
-             onclick="collected(null, {{ g }})">그룹 {{ g }}</a>
+        {# Addressed by the group's oldest file, which is also the name the
+           merged file comes back under. A number would be re-counted from
+           scratch on every listing and would slide as groups are retired. #}
+        {% for anchor, count in merge_groups %}
+          {% if count > 1 %}
+            <a class="btn" href="/api/groups/{{ anchor.name }}" download
+               onclick="collected(null, '{{ anchor.name }}')">{{ anchor.start }} · {{ count }}개</a>
+          {% endif %}
         {% endfor %}
       </p>
     {% endif %}
@@ -114,10 +130,21 @@
   <p class="small muted" style="margin:12px 0 0">
     받은 파일은 목록에서 사라지고 휴지통에 {{ cfg.trash_retention_days }}일 남습니다.
     {% if stats.trashed %}
-      현재 휴지통에 <b>{{ stats.trashed }}개</b> 있습니다. 잘못 받았으면
-      SSH로 <code>data/trash/</code>에서 되살릴 수 있습니다.
+      현재 휴지통에 <b>{{ stats.trashed }}개</b> 있습니다.
+      <a href="{{ url_for('browse', path='trash') }}">여기서 다시 받을 수 있습니다</a>.
     {% endif %}
   </p>
+
+  {# A quarantined recording is news whether or not anything else is listed:
+     it is a measurement that was made and cannot be read, and until now the
+     only trace of it was a line in the log. #}
+  {% if stats.corrupt %}
+    <p class="small" style="margin:8px 0 0">
+      <span class="pill warn">읽지 못함 {{ stats.corrupt }}개</span>
+      부팅 때 읽히지 않아 <code>corrupt/</code>로 옮겨진 기록이 있습니다.
+      <a href="{{ url_for('browse', path='corrupt') }}">받아서 확인해 보세요</a>.
+    </p>
+  {% endif %}
 </div>
 
 <script>
@@ -125,8 +152,11 @@
 // operator's next page load.
 var downloading = false;
 
-// The browser is already downloading by the time this runs -- the link is not
-// cancelled -- so this only tells the device the file has been collected.
+// This runs on the click, BEFORE the browser starts the download -- an onclick
+// handler precedes the default action -- so the POST and the transfer race each
+// other, and which one the device sees first is not decided here. The server is
+// built for that: the download holds an open descriptor and can find a file
+// that has already been retired, so either order delivers the bytes.
 // A native download is independent of the page, so the reload does not disturb it.
 //
 // The state poller stands down all the same. An earlier version of this page
@@ -134,11 +164,11 @@ var downloading = false;
 // the file into a blob and the poller reloads only on a state change, so
 // neither half of that failure is still here -- but a transfer the operator
 // drove up a crane to start is not the place to rely on that reasoning.
-function collected(name, group) {
+function collected(name, anchor) {
   downloading = true;
   var url = name
     ? '/api/files/' + encodeURIComponent(name) + '/collected'
-    : '/api/groups/' + group + '/collected';
+    : '/api/groups/' + encodeURIComponent(anchor) + '/collected';
   fetch(url, {method: 'POST'})
     .then(function () { setTimeout(function () { location.reload(); }, 2000); })
     .catch(function () {});

@@ -39,12 +39,23 @@ class FileInfo:
     def end_epoch(self) -> float:
         return self.start_epoch + self.duration_s
 
+    @property
+    def start(self) -> str:
+        """The start as the operator reads it.
+
+        A property, not something as_dict() alone knows how to render: the file
+        list asks for it directly, and a name is a rotating slot number, so this
+        is the only thing on the row that tells two recordings apart. Missing,
+        it rendered as an empty string and said nothing at all.
+        """
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.start_epoch))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "size": self.size,
             "start_epoch": round(self.start_epoch, 3),
-            "start": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.start_epoch)),
+            "start": self.start,
             "duration_s": round(self.duration_s, 1),
             "samples": self.samples,
             "blocks": self.blocks,
@@ -98,11 +109,20 @@ def describe(path: str) -> Optional[FileInfo]:
     if blocks == 0:
         return None
     parsed: Optional[dict] = af.parse_filename(path)
-    header: af.Header = af.read_header(path)
+    # Inside the guard with the rest: a file can be retired or purged between
+    # the listing that named it and the read that describes it, and when that
+    # happens the answer is one entry missing from the list, not a page that
+    # will not render at all.
+    try:
+        header: af.Header = af.read_header(path)
+        size: int = os.path.getsize(path)
+    except (OSError, af.FormatError) as exc:
+        logger.warning("Skipping {}: {}", os.path.basename(path), exc)
+        return None
     return FileInfo(
         name=os.path.basename(path),
         path=path,
-        size=os.path.getsize(path),
+        size=size,
         start_epoch=header.start_epoch,
         duration_s=duration,
         samples=samples,
@@ -148,10 +168,43 @@ def list_files(data_dir: str, gap_tolerance_s: float = 2.0) -> list[FileInfo]:
     return infos
 
 
-def group_members(data_dir: str, group: int, gap_tolerance_s: float = 2.0) -> list[FileInfo]:
-    members: list[FileInfo] = [i for i in list_files(data_dir, gap_tolerance_s) if i.group == group]
+def group_containing(data_dir: str, name: str,
+                     gap_tolerance_s: float = 2.0) -> list[FileInfo]:
+    """The members of the group that `name` belongs to, oldest first.
+
+    Addressed by a member's name rather than by the group number, because the
+    number is positional: it is handed out by counting from the oldest file on
+    the card every time the list is built, so retiring one group renumbers all
+    the ones behind it. A link the operator is looking at then points at data
+    it was not drawn for.
+
+    A name cannot drift like that. If the file is gone the answer is nothing,
+    which the caller turns into a 404 -- an honest one, where the number would
+    have quietly served a different measurement.
+    """
+    infos: list[FileInfo] = list_files(data_dir, gap_tolerance_s)
+    anchor: Optional[FileInfo] = next((i for i in infos if i.name == name), None)
+    if anchor is None:
+        return []
+    members: list[FileInfo] = [i for i in infos if i.group == anchor.group]
     members.sort(key=lambda i: i.start_epoch)
     return members
+
+
+def group_anchors(infos: list[FileInfo]) -> list[tuple[FileInfo, int]]:
+    """(oldest member, member count) per group, for the merged-download links.
+
+    The oldest is the anchor because it is the one whose name the merged file
+    already carries (section 5.4), so the link and the file the operator ends
+    up with agree.
+    """
+    oldest: dict[int, FileInfo] = {}
+    counts: dict[int, int] = {}
+    for info in infos:
+        counts[info.group] = counts.get(info.group, 0) + 1
+        if info.group not in oldest or info.start_epoch < oldest[info.group].start_epoch:
+            oldest[info.group] = info
+    return [(oldest[g], counts[g]) for g in sorted(oldest)]
 
 
 # --------------------------------------------------------------------------
@@ -160,6 +213,23 @@ def group_members(data_dir: str, group: int, gap_tolerance_s: float = 2.0) -> li
 
 def trash_path(data_dir: str) -> str:
     return os.path.join(data_dir, TRASH_DIR)
+
+
+def locate(data_dir: str, name: str) -> Optional[str]:
+    """Where a recording is right now: still to be collected, or already retired.
+
+    The download and the request that retires it come from one click and arrive
+    together, so by the time the bytes are asked for the file may have moved.
+    The operator asked for a recording by name, not for a place on the card,
+    and the answer is the same bytes wherever it currently sits.
+    """
+    path: Optional[str] = af.safe_join(data_dir, name)
+    if path is None:
+        return None
+    if os.path.exists(path):
+        return path
+    retired: str = os.path.join(trash_path(data_dir), os.path.basename(path))
+    return retired if os.path.exists(retired) else None
 
 
 def move_to_trash(data_dir: str, names: list[str]) -> list[str]:
@@ -227,6 +297,103 @@ def purge_trash(data_dir: str, retention_days: float = 7.0,
     return removed
 
 
+# --------------------------------------------------------------------------
+# Browsing the card
+# --------------------------------------------------------------------------
+#
+# The file list answers "what is there to collect", which is the right question
+# nearly always and the wrong one exactly when something has gone sideways: a
+# recording discarded because someone connected, one quarantined at boot, a log
+# from a tool that predates all of this. Those are on the card and nowhere on
+# any page. This is the way to see them, and it only reads.
+
+@dataclass
+class Entry:
+    name: str
+    rel: str                       # path relative to the data directory
+    is_dir: bool
+    size: int
+    mtime: float
+
+    @property
+    def modified(self) -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.mtime))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "rel": self.rel, "is_dir": self.is_dir,
+                "size": self.size, "mtime": round(self.mtime, 3),
+                "modified": self.modified}
+
+
+def resolve_within(root: str, rel: str) -> Optional[str]:
+    """Resolve `rel` under `root`, or None if it lands anywhere else.
+
+    Deliberately not af.safe_join. That one refuses any name carrying a
+    separator at all, and browsing has to walk into trash/ and corrupt/ -- but
+    it is also the guard standing in front of the download the operator uses
+    every day, and loosening a shared guard to serve a new page is how the hole
+    arrives two refactors later. So this is a second, separate resolver and
+    af.safe_join keeps its strictness.
+
+    The containment test runs after realpath, which is the part that matters:
+    checked before, a symlink inside the directory could still step out of it.
+    """
+    root_real: str = os.path.realpath(root)
+    candidate: str = os.path.realpath(os.path.join(root_real, rel or ""))
+    try:
+        if os.path.commonpath([root_real, candidate]) != root_real:
+            return None
+    except ValueError:
+        return None                # different drives on Windows: not under root
+    return candidate
+
+
+def list_dir(root: str, rel: str = "") -> Optional[tuple[str, list[Entry]]]:
+    """(normalised rel, entries) for one directory, or None if it is not there.
+
+    Directories first, then newest first: what someone comes here for is
+    usually either a subdirectory they were told about or the most recent
+    thing on the card.
+    """
+    path: Optional[str] = resolve_within(root, rel)
+    if path is None or not os.path.isdir(path):
+        return None
+    root_real: str = os.path.realpath(root)
+    normalised: str = os.path.relpath(path, root_real).replace(os.sep, "/")
+    if normalised == ".":
+        normalised = ""
+
+    entries: list[Entry] = []
+    try:
+        names: list[str] = os.listdir(path)
+    except OSError as exc:
+        logger.error("Cannot read {}: {}", path, exc)
+        return normalised, []
+
+    for name in names:
+        full: str = os.path.join(path, name)
+        try:
+            stat = os.stat(full)
+        except OSError:
+            continue               # vanished between the listing and here
+        entries.append(Entry(
+            name=name,
+            rel="{0}/{1}".format(normalised, name) if normalised else name,
+            is_dir=os.path.isdir(full),
+            size=0 if os.path.isdir(full) else stat.st_size,
+            mtime=stat.st_mtime,
+        ))
+    entries.sort(key=lambda e: (not e.is_dir, -e.mtime))
+    return normalised, entries
+
+
+def parent_of(rel: str) -> Optional[str]:
+    """The directory above `rel`, or None at the top of the card."""
+    if not rel:
+        return None
+    return rel.rsplit("/", 1)[0] if "/" in rel else ""
+
+
 def free_mb(path: str) -> float:
     try:
         return shutil.disk_usage(path).free / (1024.0 * 1024.0)
@@ -236,14 +403,28 @@ def free_mb(path: str) -> float:
 
 def stats(data_dir: str) -> dict[str, Any]:
     infos: list[FileInfo] = list_files(data_dir)
-    trash: str = trash_path(data_dir)
-    trashed: int = 0
-    if os.path.isdir(trash):
-        trashed = sum(1 for n in os.listdir(trash) if n.endswith(af.EXT))
     return {
         "files": len(infos),
         "groups": len({i.group for i in infos}),
         "bytes": sum(i.size for i in infos),
-        "trashed": trashed,
+        "trashed": _count_in(trash_path(data_dir)),
+        # Counted for the same reason as the trash: when the list is empty the
+        # operator needs to know whether that means there is nothing, or that
+        # everything ended up somewhere they were never shown.
+        "corrupt": _count_in(os.path.join(data_dir, CORRUPT_DIR)),
         "free_mb": round(free_mb(data_dir), 1),
     }
+
+
+def _count_in(directory: str) -> int:
+    """Recordings sitting in one of the side directories.
+
+    A quarantined file keeps its .partial suffix, so match on the extension
+    appearing anywhere in the name rather than at the end of it.
+    """
+    if not os.path.isdir(directory):
+        return 0
+    try:
+        return sum(1 for n in os.listdir(directory) if af.EXT in n)
+    except OSError:
+        return 0

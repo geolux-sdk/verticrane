@@ -65,13 +65,56 @@ def register(app: Flask) -> None:
     @app.get("/")
     def index() -> str:
         rec: Any = _recorder()
+        files = filestore.list_files(_data_dir(), _gap())
         return render_template(
             "index.html",
             status=rec.snapshot() if rec else None,
-            files=filestore.list_files(_data_dir(), _gap()),
+            files=files,
+            # (anchor, count) per group. Built here rather than in the template
+            # so the merged-download links are addressed by a file name, which
+            # survives another group being retired underneath them.
+            merge_groups=filestore.group_anchors(files),
             stats=filestore.stats(_data_dir()),
             cfg=_cfg(),
         )
+
+    @app.get("/files")
+    def browse() -> str:
+        rel: str = request.args.get("path", "")
+        listing = filestore.list_dir(_data_dir(), rel)
+        if listing is None:
+            listing = ("", [])
+        here, entries = listing
+        rec: Any = _recorder()
+        return render_template("browse.html",
+                               status=rec.snapshot() if rec else None,
+                               here=here, entries=entries,
+                               parent=filestore.parent_of(here),
+                               stats=filestore.stats(_data_dir()),
+                               cfg=_cfg())
+
+    @app.get("/api/browse")
+    def api_browse() -> Response:
+        listing = filestore.list_dir(_data_dir(), request.args.get("path", ""))
+        if listing is None:
+            return jsonify({"error": "not found"}), 404
+        here, entries = listing
+        return jsonify({"path": here,
+                        "parent": filestore.parent_of(here),
+                        "entries": [e.as_dict() for e in entries]})
+
+    @app.get("/api/raw/<path:rel>")
+    def api_raw(rel: str) -> Response:
+        """Any file on the card, byte for byte.
+
+        Reading only, and it never retires anything: this is the way to look
+        at what the file list deliberately leaves out, and a page for seeing
+        the trash that tidied the trash as you looked would be its own bug.
+        """
+        path: Optional[str] = filestore.resolve_within(_data_dir(), rel)
+        if path is None or not os.path.isfile(path):
+            return jsonify({"error": "not found"}), 404
+        return _send([path], os.path.basename(path))
 
     @app.get("/settings")
     def settings() -> str:
@@ -164,20 +207,28 @@ def register(app: Flask) -> None:
             g["files"] += 1
             g["bytes"] += info.size
             g["duration_s"] = round(g["duration_s"] + info.duration_s, 1)
+        # The anchor, not the number, is what /api/groups/... takes: the number
+        # is only here so a caller can still see how the files were split.
+        for anchor, _count in filestore.group_anchors(infos):
+            groups[anchor.group]["anchor"] = anchor.name
         return jsonify({"files": [i.as_dict() for i in infos],
                         "groups": sorted(groups.values(), key=lambda g: g["group"]),
                         "stats": filestore.stats(_data_dir())})
 
     @app.get("/api/files/<path:filename>")
     def api_download(filename: str) -> Response:
-        path: Optional[str] = af.safe_join(_data_dir(), filename)
-        if path is None or not os.path.exists(path):
+        # Resolved through locate(), so a recording that the collect POST has
+        # already retired still comes back. Both requests leave the browser on
+        # one click and there is no order between them; the operator asked for
+        # a recording, and where it sits on the card is not their problem.
+        path: Optional[str] = filestore.locate(_data_dir(), filename)
+        if path is None:
             return jsonify({"error": "not found"}), 404
         return _send([path], os.path.basename(path))
 
-    @app.get("/api/groups/<int:group>")
-    def api_download_group(group: int) -> Response:
-        members = filestore.group_members(_data_dir(), group, _gap())
+    @app.get("/api/groups/<anchor>")
+    def api_download_group(anchor: str) -> Response:
+        members = filestore.group_containing(_data_dir(), anchor, _gap())
         if not members:
             return jsonify({"error": "not found"}), 404
         if len(members) == 1:
@@ -191,18 +242,23 @@ def register(app: Flask) -> None:
             af.merge([m.path for m in members], merged)
         except (OSError, af.FormatError) as exc:
             os.unlink(merged)
-            logger.error("Merge of group {} failed: {}", group, exc)
+            logger.error("Merge of the group at {} failed: {}", anchor, exc)
             return jsonify({"error": str(exc)}), 500
         return _send([merged], members[0].name, cleanup=merged)
 
     @app.post("/api/files/<path:filename>/collected")
     def api_collected(filename: str) -> Response:
-        """The operator's browser confirming it has the file on disk.
+        """The operator's browser saying it has asked for the file.
 
-        This, not the end of the transfer, is what retires a recording. It is
-        sent only after the whole body has been read and handed to the browser
-        to save, so a connection that dropped part way through never gets here
-        and the file stays in the list (section 7).
+        This, not the end of the transfer, is what retires a recording -- and
+        it is sent on the click, in parallel with the download itself, because
+        a native download is independent of the page and its completion is not
+        something the page can observe.
+
+        So this can land before, during or after the transfer, and none of the
+        three is a problem: retiring is a move into the trash, _send() holds an
+        open descriptor, and locate() finds a retired file anyway. The file
+        keeps its days in the trash whichever way the transfer went (section 7).
         """
         if not bool(_cfg().get("delete_after_download", True)):
             return jsonify({"retired": [], "reason": "disabled"})
@@ -212,11 +268,11 @@ def register(app: Flask) -> None:
         return jsonify({"retired": filestore.move_to_trash(
             _data_dir(), [os.path.basename(path)])})
 
-    @app.post("/api/groups/<int:group>/collected")
-    def api_group_collected(group: int) -> Response:
+    @app.post("/api/groups/<anchor>/collected")
+    def api_group_collected(anchor: str) -> Response:
         if not bool(_cfg().get("delete_after_download", True)):
             return jsonify({"retired": [], "reason": "disabled"})
-        members = filestore.group_members(_data_dir(), group, _gap())
+        members = filestore.group_containing(_data_dir(), anchor, _gap())
         if not members:
             return jsonify({"error": "not found"}), 404
         # The operator received the merged whole, so the whole group retires.
@@ -256,33 +312,56 @@ def _send(paths: list[str], display_name: str,
     operator. A file smaller than one chunk leaves here in a single write and
     the loop ends long before anything is delivered, so "the download finished"
     is not something this side can observe. The client says so instead.
+
+    Every file is opened here, before there is a response, and the body is read
+    from those descriptors rather than from the paths again. What retires a
+    recording is a request that arrives *alongside* this one -- one click sends
+    both -- so between sizing the body and yielding the first chunk the file can
+    have been moved into the trash. A descriptor does not care; a path does, and
+    caring showed up as a 404, a 500, or a body that stopped short of the
+    Content-Length already promised.
     """
-    total: int = sum(os.path.getsize(p) for p in paths)
+    handles: list[Any] = []
+    try:
+        for path in paths:
+            handles.append(open(path, "rb"))
+    except OSError as exc:
+        for handle in handles:
+            handle.close()
+        if cleanup and os.path.exists(cleanup):
+            os.unlink(cleanup)
+        logger.error("Cannot open {} to send: {}", display_name, exc)
+        return jsonify({"error": "not found"}), 404
+
+    sizes: list[int] = [os.fstat(h.fileno()).st_size for h in handles]
+    total: int = sum(sizes)
     start, end = _wanted_range(total)
     partial: bool = (start, end) != (0, total - 1)
 
     def generate() -> Iterator[bytes]:
         try:
             offset: int = 0            # where this file begins in the whole body
-            for path in paths:
-                size: int = os.path.getsize(path)
+            for handle, size in zip(handles, sizes):
                 if offset + size <= start:
                     offset += size     # entirely before the requested range
                     continue
                 if offset > end:
                     break
-                with open(path, "rb") as f:
-                    if start > offset:
-                        f.seek(start - offset)
-                    remaining: int = min(end, offset + size - 1) - max(start, offset) + 1
-                    while remaining > 0:
-                        chunk: bytes = f.read(min(CHUNK, remaining))
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
+                if start > offset:
+                    handle.seek(start - offset)
+                remaining: int = min(end, offset + size - 1) - max(start, offset) + 1
+                while remaining > 0:
+                    chunk: bytes = handle.read(min(CHUNK, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
                 offset += size
         finally:
+            for handle in handles:
+                handle.close()
+            # After the descriptors, not before: Windows refuses to unlink a
+            # file that is still open, and dev/fake_card.py runs there.
             if cleanup and os.path.exists(cleanup):
                 os.unlink(cleanup)
 
