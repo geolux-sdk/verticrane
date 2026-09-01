@@ -899,6 +899,14 @@ def main() -> int:
         except Exception as exc:                          # noqa: BLE001
             logger.error("Panel unavailable ({}); recording anyway", exc)
 
+    # Before the web server, and this order is the whole point: until the
+    # leftover .partial has been finalised it is not a listable recording, so a
+    # page served first says there is nothing to collect about a file sitting
+    # right there. The operator who cycles the power and connects straight away is
+    # exactly the one who hits that window, and it is not a short one: recovery
+    # CRCs every block, which is one per second of crane time.
+    rec.recover_leftovers()
+
     if not args.no_web:
         try:
             import web
