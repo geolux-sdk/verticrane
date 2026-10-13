@@ -584,28 +584,67 @@ A와 B를 한 파일로 병합하면 A의 헤더를 사용하고, B의 데이터
 
 ## 7. 설정
 
-`config.json`의 `recorder` 섹션. 전체 목록과 근거는 요구사항 §10.
+설정은 `config.json`에 저장합니다. 파일에 없는 항목은 `app_config.py`의 기본값을
+사용합니다. `config.json`은 장치마다 다르며 Git에 포함하지 않습니다.
 
-**웹 화면에서 바꾸는 것** — 운영자가 현장에서 정해야 하는 값
+**아래 현재값은 2026-10-13에 확인한 로컬 개발 폴더의 설정입니다.** 로컬 파일에는
+`recorder` 항목이 없으므로 기록기 설정은 모두 기본값을 사용합니다. Pi
+`pi-tilt001`(`192.168.0.19`)은 이번 확인 시 SSH 접속이 시간 초과되어 최신 설정을
+읽지 못했습니다. 따라서 아래 값을 Pi의 현재 운영값으로 해석하면 안 됩니다.
+설정을 변경한 뒤에는 이 표도 갱신해야 합니다.
 
-`sensor_flag` · `mount_delay_seconds` · `http_wait_seconds` ·
-`network_wait_seconds` · `segment_minutes` · `delete_after_download` ·
-`trash_retention_days` · `min_free_mb`
+### 기록기 설정 — `config.json`의 `recorder` 항목
 
-**파일에서만 바꾸는 것** — 공학적으로 정해진 값
+변경 위치의 **웹**은 `http://<장비IP>:8080/settings`에서 수정할 수 있다는 뜻입니다.
+**파일**은 SSH로 `config.json`을 직접 수정해야 하는 항목입니다.
 
-`stability_window_seconds` · `stability_min_samples` · `gyro_rms_max_dps` ·
-`accel_std_max_g` · `attitude_std_max_deg` · `stop_on_unstable` ·
-`record_fsync_interval_seconds` · `merge_gap_tolerance_seconds` ·
-`time_save_interval_seconds` · `ip_check_interval_seconds` · `contact_face` ·
-`panel_refresh_seconds` · `panel_rotation` · `http_port`
+| 파라미터 | 의미 | 단위 | 현재값 (로컬) | 기본값 | 변경 위치 |
+|---|---|---|---|---|---|
+| `sensor_flag` | 크레인 설치 위치. `base` / `middle` / `top` / `unset`; 파일명 앞부분에 반영 | — | `unset` | `unset` | 웹 |
+| `contact_face` | 설치 안내 그림에서 구조물에 닿는 면. `bottom` / `top` / `left` / `right`; 측정 축을 변환하지 않음 | — | `bottom` | `bottom` | 파일 |
+| `mount_delay_seconds` | 서비스 시작 후 장비 설치를 위해 기록하지 않고 기다리는 시간 | 초 | 60 | 60 | 파일 |
+| `network_wait_seconds` | 네트워크 링크가 있을 때 IP 할당을 기다리는 최대 시간 | 초 | 90 | 90 | 파일 |
+| `http_wait_seconds` | 설치 유예·IP 대기 이후 운영자의 브라우저 접속을 기다리는 시간. 네트워크 링크가 없으면 건너뜀 | 초 | 60 | 60 | 웹 |
+| `stability_window_seconds` | 안정화 판단에 사용할 최근 센서 데이터의 시간 범위 | 초 | 5.0 | 5.0 | 파일 |
+| `stability_min_samples` | 안정화 판단에 필요한 최소 샘플 수 | 개 | 100 | 100 | 파일 |
+| `gyro_rms_max_dps` | 안정 상태로 판단할 자이로 회전 속도 RMS의 상한 | °/s | 0.5 | 0.5 | 파일 |
+| `accel_std_max_g` | 안정 상태로 판단할 가속도 변동(표준편차)의 상한 | g | 0.01 | 0.01 | 파일 |
+| `attitude_std_max_deg` | 안정 상태로 판단할 자세각 변동(표준편차)의 상한 | ° | 0.3 | 0.3 | 파일 |
+| `stop_on_unstable` | `true`: 흔들림 발생 시 기록 종료 후 안정화 대기. `false`: 기록을 계속하며 흔들림 표시 | — | `false` | `false` | 파일 |
+| `record_fsync_interval_seconds` | 기록 데이터를 디스크에 반영하는 `fsync` 호출 간격 | 초 | 1.0 | 1.0 | 파일 |
+| `segment_minutes` | 기록 파일 분할 간격. `0`이면 시간에 따른 분할 없이 한 파일에 기록 | 분 | 0 | 0 | 웹 |
+| `merge_gap_tolerance_seconds` | 앞 파일의 종료와 다음 파일의 시작 사이에 허용하는 차이. 이 범위 내이면 연속 그룹으로 분류 | 초 | 2.0 | 2.0 | 파일 |
+| `time_save_interval_seconds` | 장치가 마지막으로 확인한 시스템 시각을 `.lastknown`에 저장하는 간격. 다음 시작 시 시각 복원에 사용 | 초 | 10 | 10 | 파일 |
+| `panel_refresh_seconds` | e-paper 측정 화면 갱신 간격. 정상 동작 시 다른 화면에는 적용하지 않음 | 초 | 60 | 60 | 파일 |
+| `ip_check_interval_seconds` | IP 변경을 확인하여 패널 갱신을 요청하는 간격 | 초 | 10 | 10 | 파일 |
+| `panel_rotation` | e-paper 화면의 시계 방향 회전각. `0` / `90` / `180` / `270` | ° | 90 | 90 | 파일 |
+| `delete_after_download` | `true`: 회수 확인 요청 시 파일을 휴지통으로 이동. `false`: 원래 파일 목록에 유지; 즉시 삭제하는 설정은 아님 | — | `true` | `true` | 웹 |
+| `trash_retention_days` | 휴지통 파일 보관 기간. 기간이 지나면 정리 작업에서 삭제; 저장 공간 부족 시에는 더 일찍 정리될 수 있음 | 일 | 7 | 7 | 웹 |
+| `min_free_mb` | 기록에 필요한 최소 여유 공간. 부족하면 휴지통을 정리하고, 그래도 확보되지 않으면 기록 중지 | MB | 500 | 500 | 웹 |
+| `http_port` | 운영자 웹·HTTP API가 사용하는 포트 | — | 8080 | 8080 | 파일 |
 
-> **안정화 기준을 화면에 두지 않은 이유:** 손으로 만지면 기록이 아예 시작되지
-> 않거나 흔들리는 중에 시작됩니다. 화면에 있는 설정은 언젠가 누군가 바꿉니다.
+안정화 판단은 최소 샘플 수를 확보하고 자이로·가속도·자세각 기준을 모두 만족해야
+통과합니다. 각 기준을 지나치게 낮추면 기록이 시작되지 않을 수 있고, 높이면
+움직이는 중에도 기록이 시작될 수 있습니다.
 
-`panel_refresh_seconds`는 **측정 화면에만** 적용됩니다. 나머지 화면은 이벤트로만
-그립니다. **초 단위로 낮추지 마세요** — 갱신 1회가 1.4초이고 패널 수명이 갱신
-횟수로 정해집니다 (1초 주기면 약 2주에 소진).
+측정 화면은 한 번 갱신하는 데 약 1.4초가 걸립니다. `panel_refresh_seconds`를
+불필요하게 줄이면 패널 갱신 횟수가 늘어납니다. 코드에서는 최소 10초로 제한하며,
+기본값은 60초입니다. 패널 출력 실패 시에는 별도로 30초 뒤 재시도합니다.
+
+### 공통·개발 분석 설정 — `config.json`의 최상위 항목
+
+다음 항목은 `recorder` 안에 넣지 않고 `config.json`의 최상위에 저장합니다.
+
+| 파라미터 | 의미 | 단위 | 현재값 (로컬) | 기본값 | 변경 위치 |
+|---|---|---|---|---|---|
+| `LOG_LEVEL` | 로그 출력 수준. 기본 `INFO`; 상세 진단은 `DEBUG`, 경고 위주 확인은 `WARNING` | — | `INFO` | `INFO` | 파일 |
+| `slope_threshold_pct` | 개발용 분석·대시보드에서 이동평균 기울기를 평가하는 기준. 운영 기록기의 자동 시작·중지 조건에는 사용하지 않음 | % | 0.2 | 0.1 | 파일 / 개발 대시보드 |
+| `ma_seconds` | 개발용 분석·대시보드의 기울기 이동평균 계산 시간 범위 | 초 | 1.0 | 1.0 | 파일 / 개발 대시보드 |
+
+PIN 인증용 저장 항목은 이 표에서 제외했습니다. 파일을 직접 수정한 설정은
+서비스를 재시작하여 반영합니다. 재시작하면 진행 중인 기록을 종료하고 설치 유예·
+접속 대기부터 다시 진행합니다. 현재 운영값을 확인하려면 해당 Pi의 설정 파일을
+읽어야 하며, 실행 인자의 설정 덮어쓰기도 함께 확인해야 합니다.
 
 ---
 
