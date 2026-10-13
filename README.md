@@ -256,14 +256,59 @@ sudo systemctl disable --now verticrane-dashboard 2>/dev/null || true
 
 ## 4. 실행
 
-```bash
-# systemd (상시 가동)
-systemctl status verticrane-recorder
-journalctl -u verticrane-recorder -f
+아래 명령은 Pi에 SSH로 로그인한 뒤 실행합니다.
 
+### 서비스 상태·시작·중지
+
+```bash
+# 현재 서비스 상태 확인
+systemctl status verticrane-recorder
+
+# 서비스 시작
+sudo systemctl start verticrane-recorder
+
+# 서비스 중지 — 진행 중인 기록 파일을 종료 처리
+sudo systemctl stop verticrane-recorder
+
+# 서비스 재시작 — 설치 유예·접속 대기부터 다시 진행
+sudo systemctl restart verticrane-recorder
+```
+
+`stop`은 현재 서비스를 중지합니다. 부팅 시 자동 실행 설정은 유지되므로 다음
+부팅에는 다시 시작됩니다. 부팅 시 자동 실행도 끄거나 다시 켜려면 아래를 사용합니다.
+
+```bash
+sudo systemctl disable --now verticrane-recorder  # 지금 중지 + 자동 실행 해제
+sudo systemctl enable --now verticrane-recorder   # 자동 실행 등록 + 지금 시작
+```
+
+### 로그 확인
+
+```bash
+# 최근 로그 80줄
+journalctl -u verticrane-recorder -n 80 --no-pager
+
+# 이번 부팅의 로그
+journalctl -b -u verticrane-recorder --no-pager
+
+# 최근 10분의 로그
+journalctl -u verticrane-recorder --since "10 minutes ago" --no-pager
+
+# 실시간 로그 — Ctrl+C로 조회 종료 (서비스는 계속 실행)
+journalctl -u verticrane-recorder -f
+```
+
+SSH 접속과 로그 조회는 브라우저 접속으로 취급되지 않으므로 기록을 억제하지 않습니다.
+
+### 직접 실행
+
+```bash
 # 직접 실행 — 서비스를 먼저 멈춰야 합니다 (시리얼 포트가 하나뿐)
 ./dev/devmode.sh .venv/bin/python recorder.py
 ```
+
+`devmode.sh`는 기존 서비스를 중지하고 명령을 실행한 뒤, 종료 시 기존에 실행 중이던
+서비스를 다시 시작합니다. 직접 실행한 기록기를 종료하려면 `Ctrl+C`를 누릅니다.
 
 ### `recorder.py` 옵션
 
