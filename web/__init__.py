@@ -1,5 +1,5 @@
 # coding:UTF-8
-# Operator web interface for the AUTO_RUN recorder (sections 7 and 8).
+# Operator web interface for the AUTO_RUN recorder (see README.md).
 #
 # Runs inside the recorder process on its own thread, so the status it reports
 # is the live object rather than a copy passed through a file or a socket.

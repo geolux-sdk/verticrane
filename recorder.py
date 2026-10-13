@@ -1,5 +1,5 @@
 # coding:UTF-8
-# AUTO_RUN recording loop and state machine (sections 3 and 6).
+# AUTO_RUN recording loop and state machine (see README.md).
 #
 #   python recorder.py                      normal boot sequence
 #   python recorder.py --seconds 120        stop after two minutes (bench test)
@@ -69,11 +69,11 @@ EXPECTED_CONFIG: dict[int, tuple[str, int, dict[int, str]]] = {
     # steel and motors, so the magnetometer cannot be trusted for heading.
     0x24: ("알고리즘", 1, {0: "9축", 1: "6축"}),
     # 10 Hz, not the factory default of 20 Hz. Sampling at 25 Hz assumes it:
-    # anything faster aliases vibration down into the slow tilt band (section 1).
+    # anything faster aliases vibration down into the slow tilt band (see README.md).
     0x1F: ("대역폭", 5, {3: "42 Hz", 4: "20 Hz", 5: "10 Hz", 6: "5 Hz"}),
 }
 
-# States, per section 3.
+# States, per README.md
 WAITING_HTTP: str = "waiting_http"
 WAITING_STABLE: str = "waiting_stable"
 RECORDING: str = "recording"
@@ -88,7 +88,7 @@ RECONNECT_MAX_S: float = 30.0
 # --------------------------------------------------------------------------
 
 class TimeKeeper:
-    """Keeps the clock from going backwards on a board with no RTC (section 3).
+    """Keeps the clock from going backwards on a board with no RTC (see README.md).
 
     Never sets the system clock -- that needs privileges the service does not
     have. It keeps an internal offset instead, which is all a header timestamp
@@ -366,7 +366,7 @@ class Recorder:
     @property
     def position(self) -> int:
         # Read from config each time, so changing it on the settings page takes
-        # effect from the next recording without a restart (section 8).
+        # effect from the next recording without a restart (see README.md).
         return af.POSITION_VALUES.get(
             str(self.cfg.get("sensor_flag", "unset")).lower(), af.POS_UNSET)
 
@@ -400,7 +400,7 @@ class Recorder:
     # -- boot -------------------------------------------------------------
 
     def recover_leftovers(self) -> list[str]:
-        """Step 1 of section 3: finish what the last power cut interrupted."""
+        """Finish files left by a previous power cut before serving the file list."""
         try:
             recovered: list[str] = af.recover_all(self.data_dir)
         except OSError as exc:
@@ -649,7 +649,7 @@ class Recorder:
 
     def _flush_block(self) -> None:
         # A block is 25 samples, not one second: it goes out when it is full,
-        # however long that took (section 5.2). Anything short is dropped.
+        # however long that took (see README.md). Anything short is dropped.
         if self.writer is None:
             return
         if len(self._pending) < af.SAMPLES_PER_BLOCK:
@@ -785,7 +785,7 @@ class Recorder:
         if free >= float(self.cfg["min_free_mb"]):
             return
         # Files already collected are the cheapest thing to give up; losing the
-        # recording is the expensive outcome (section 11).
+        # recording is the expensive outcome (see README.md).
         needed: int = int((float(self.cfg["min_free_mb"]) - free) * 1024 * 1024)
         purged: int = filestore.purge_trash(
             self.data_dir, float(self.cfg["trash_retention_days"]), max(needed, 0))

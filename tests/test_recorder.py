@@ -1,5 +1,5 @@
 # coding:UTF-8
-# Self-check for the recording loop's failure paths (sections 3, 6).
+# Self-check for the recording loop's failure paths (see README.md).
 #
 #   python tests/test_recorder.py
 #
@@ -96,7 +96,7 @@ def test_write_failure(tmp: str) -> None:
 
 
 def test_short_block_is_dropped(tmp: str) -> None:
-    """A block that never filled is dropped, not padded (section 5.2)."""
+    """A block that never filled is dropped, not padded (see README.md)."""
     print("\n[2] 덜 찬 블록")
     rec = recorder.Recorder("/dev/null", app_config.RECORDER_DEFAULTS.copy(), tmp)
     writer = _RefusingWriter(os.path.join(tmp, "TOP_001.dat.partial"))

@@ -14,11 +14,9 @@
 # range 0x20, accel range 0x21); change a range and every earlier file needs a
 # different factor. Decoded, the number in the file is the physical quantity.
 #
-# Everything about wall-clock time lives OUTSIDE the binary. The header carries
-# what the device believed at the moment recording started, which may be wrong
-# (the Pi has no RTC). The authoritative start time is the one in the FILENAME,
-# established once when the file is opened and never revised. See sections 3, 5
-# and 6 of TILT_기록시스템_구현요구사항.md.
+# The header carries the system time at recording start, which may be wrong
+# on a Pi without an RTC. The slot filename contains no timestamp, and recovery
+# preserves the original header start time. See README.md for format and recovery.
 
 from __future__ import annotations
 
@@ -53,7 +51,7 @@ _BLOCK_FMT: str = "<HHHHQfI{0}fII".format(SAMPLES_PER_BLOCK * FLOATS_PER_SAMPLE)
 assert struct.calcsize(_HEADER_FMT) == HEADER_SIZE
 assert struct.calcsize(_BLOCK_FMT) == BLOCK_SIZE
 
-# Block status flags (see section 5.2).
+# Block status flags (see README.md).
 FLAG_READ_FAILED: int = 1 << 0    # a serial read failed while filling this block
 FLAG_RECONNECTED: int = 1 << 1    # the serial link was re-established in this block
 FLAG_UNSTABLE: int = 1 << 2       # this stretch was outside the stability limits
@@ -104,7 +102,7 @@ class FormatError(Exception):
 @dataclass
 class Header:
     # What the device believed when recording started. May be wrong; the
-    # filename wins if the two disagree (section 5.2).
+    # filename wins if the two disagree (see README.md).
     start_epoch: float = 0.0
     sensor_id: str = ""
     position: int = POS_UNSET
@@ -410,7 +408,7 @@ class Writer:
     """Appends blocks to a .partial file.
 
     Never renames while recording: the rename that fixes the timestamp happens
-    during boot recovery, when nothing is being written (section 3).
+    during boot recovery, when nothing is being written (see README.md).
     """
 
     def __init__(self, path: str, header: Header, fsync_interval_s: float = 1.0) -> None:
@@ -425,7 +423,7 @@ class Writer:
         # time belonging to the first, the second's elapsed_ms restarting from
         # zero. Every block CRC would still pass, so scan() and the operator's
         # list would both accept it: silent corruption that nothing downstream
-        # can detect. Slots rotate and rotating means overwriting (section 5.1),
+        # can detect. Slots rotate and rotating means overwriting (see README.md),
         # so truncating here is the same rule applied one step earlier.
         self._f: BinaryIO = open(path, "w+b")
         self._f.write(header.pack())
@@ -448,7 +446,7 @@ class Writer:
         os.fsync(self._f.fileno())
 
     def close(self) -> None:
-        # close() alone does not reach the disk, so sync first (section 6).
+        # close() alone does not reach the disk, so sync first (see README.md).
         try:
             self.sync()
         finally:
@@ -556,13 +554,11 @@ def recover_partial(partial_path: str, corrupt_dir: Optional[str] = None,
     """Verify a leftover .partial, trim the torn tail, and finalise it.
 
     This is the normal end of a recording: in the field the power simply drops,
-    so nothing gets finalised at shutdown (section 6). Returns the new path, or
+    so nothing gets finalised at shutdown (see README.md). Returns the new path, or
     None if the file was unusable and got moved aside.
 
-    Finalising is now only the loss of the .partial suffix -- the slot was
-    settled when the recording opened. What recovery still decides is what the
-    sidecar says: the corrected start time if one arrived, and whether the tail
-    was lost.
+    Finalising removes the .partial suffix. Recovery records its flag in the
+    header and preserves the original start time; no sidecar is written.
 
     mark_recovered=False is for the rare orderly stop, where the tail is known
     to be complete. "recovered" means "this file lost its end", so putting it
@@ -639,7 +635,7 @@ def recover_all(data_dir: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 def group_contiguous(paths: list[str], gap_tolerance_s: float = 2.0) -> list[list[str]]:
-    """Split files into runs that are continuous in time (section 5.4)."""
+    """Split files into runs that are continuous in time (see README.md)."""
     entries: list[tuple[float, str, Summary]] = []
     for path in paths:
         try:
@@ -692,7 +688,7 @@ def merge(paths: list[str], out_path: str) -> str:
 # --------------------------------------------------------------------------
 
 def next_boot_count(data_dir: str) -> int:
-    """Increment and return the persistent boot counter (section 5.1)."""
+    """Increment and return the persistent boot counter (see README.md)."""
     path: str = os.path.join(data_dir, ".bootcount")
     try:
         with open(path, encoding="utf-8") as f:

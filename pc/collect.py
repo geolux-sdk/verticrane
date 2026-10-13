@@ -9,7 +9,7 @@
 # there is nothing to install on a machine that is about to be driven to a site.
 #
 # Connecting ends a measurement in progress -- that is the device's rule, not
-# this script's (section 3): reaching it means someone is beside it, and the
+# this script's (see README.md): reaching it means someone is beside it, and the
 # recording that was running only started because nobody was. A person runs
 # this, so that is exactly right, and the file is finalised into the trash
 # rather than lost. It is announced anyway, because a surprise is worse than a
@@ -155,7 +155,7 @@ def collect(host: str, out_dir: str, keep: bool) -> tuple[int, int, int]:
         # Only now: the bytes are on this disk and the size matches what the
         # device said. The device cannot observe delivery itself -- a finished
         # response only means the bytes left its socket -- so this call is the
-        # only thing that retires a recording (section 7).
+        # only thing that retires a recording (see README.md).
         retired = ""
         if not keep:
             try:

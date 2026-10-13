@@ -1,6 +1,6 @@
 # coding:UTF-8
 # Self-check for the panel's two decisions: which screen a moment calls for,
-# and when the thread should next wake up (section 9).
+# and when the thread should next wake up (see README.md).
 #
 #   python tests/test_eink_panel.py
 #

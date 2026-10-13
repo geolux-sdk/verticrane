@@ -55,7 +55,7 @@ RECORDER_DEFAULTS: dict[str, Any] = {
     "segment_minutes": 0,                  # 0 = one file until the power drops
     "merge_gap_tolerance_seconds": 2.0,
     "stop_on_unstable": False,             # swaying is the thing we came to record
-    "panel_refresh_seconds": 60,           # measurement screen only: see section 9
+    "panel_refresh_seconds": 60,           # measurement screen only: see README.md
     "ip_check_interval_seconds": 10,       # how soon the panel learns the address changed
     "panel_rotation": 90,                  # clockwise; the panel is mounted turned
     "delete_after_download": True,

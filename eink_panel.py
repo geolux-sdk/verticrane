@@ -1,5 +1,5 @@
 # coding:UTF-8
-# The e-paper panel: measurement status and permanent installation label (section 9).
+# The e-paper panel: measurement status and permanent installation label (see README.md).
 #
 #   python eink_panel.py --out panel.png      render to a file, no hardware needed
 #   python eink_panel.py --demo               draw a sample frame on the panel
@@ -389,7 +389,7 @@ def show(img: Image.Image) -> bool:
     """Push a frame to the panel. False if the panel is absent or unhappy.
 
     Never raises: a recorder that dies because a display is missing has lost
-    the measurement, which is the one thing that matters (section 9).
+    the measurement, which is the one thing that matters (see README.md).
     """
     try:
         import gdey0154d67 as epd
@@ -414,7 +414,7 @@ def show(img: Image.Image) -> bool:
 
 
 class PanelThread:
-    """Draws the panel when something happens, not on a clock (section 9).
+    """Draws the panel when something happens, not on a clock (see README.md).
 
     A refresh blocks on SPI for about 1.4 s. On the polling loop that would
     drop 35 samples every minute, so it runs here and only ever reads a

@@ -1,5 +1,5 @@
 # coding:UTF-8
-# Decides when the sensor has settled enough to start recording (section 4).
+# Decides when the sensor has settled enough to start recording (see README.md).
 #
 #   python stability.py data/tilt_log_20260619_114626.csv
 #
@@ -54,7 +54,7 @@ class Limits:
     @classmethod
     def from_config(cls, cfg: dict[str, Any]) -> "Limits":
         # Recorder settings live under a "recorder" key in config.json so they
-        # sit beside the existing dashboard settings (section 1).
+        # sit beside the existing dashboard settings (see README.md).
         rec: dict[str, Any] = dict(DEFAULTS)
         rec.update(cfg.get("recorder", {}) or {})
         return cls(
@@ -116,7 +116,7 @@ def circular_stdev_deg(angles_deg: Iterable[float]) -> float:
 
     A plain standard deviation of [359.9, 0.1] reports ~180 degrees when the
     real spread is 0.2. Yaw crosses that seam constantly, so the dispersion is
-    taken from the mean resultant length instead (section 4).
+    taken from the mean resultant length instead (see README.md).
     """
     seq: list[float] = list(angles_deg)
     if len(seq) < 2:

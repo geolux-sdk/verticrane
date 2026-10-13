@@ -1,5 +1,5 @@
 # coding:UTF-8
-# HTTP API and pages (sections 7 and 8).
+# HTTP API and pages (see README.md).
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import filestore
 
 CHUNK: int = 64 * 1024
 
-# Requests that must not count as "the operator is here" (section 3). A probe
+# Requests that must not count as "the operator is here" (see README.md). A probe
 # from a health check or a browser fetching an icon is not someone collecting
 # files, and treating it as such would suppress a whole measurement.
 _IGNORED_PATHS: frozenset[str] = frozenset({"/favicon.ico", "/healthz"})
@@ -158,7 +158,7 @@ def register(app: Flask) -> None:
             return redirect(url_for("settings", e="저장 실패: {0}".format(exc)))
 
         # The running recording keeps the limits it started with; the new values
-        # apply from the next stability judgement (section 8).
+        # apply from the next stability judgement (see README.md).
         cfg.update(staged)
         logger.info("Settings changed: {}", ", ".join(sorted(staged)))
         return redirect(url_for("settings", m="저장했습니다."))
@@ -235,7 +235,7 @@ def register(app: Flask) -> None:
             return _send([members[0].path], members[0].name)
 
         # Merge into one recording, keeping the first member's slot name and
-        # start timestamp in the header (section 5.4).
+        # start timestamp in the header (see README.md).
         fd, merged = tempfile.mkstemp(suffix=af.EXT, prefix="merge_")
         os.close(fd)
         try:
@@ -258,7 +258,7 @@ def register(app: Flask) -> None:
         So this can land before, during or after the transfer, and none of the
         three is a problem: retiring is a move into the trash, _send() holds an
         open descriptor, and locate() finds a retired file anyway. The file
-        keeps its days in the trash whichever way the transfer went (section 7).
+        keeps its days in the trash whichever way the transfer went (see README.md).
         """
         if not bool(_cfg().get("delete_after_download", True)):
             return jsonify({"retired": [], "reason": "disabled"})
@@ -380,7 +380,7 @@ def _wanted_range(total: int) -> tuple[int, int]:
     """The byte range the client asked for, clamped to what exists.
 
     Whole-body on anything unparseable rather than a 416. The vehicle's WiFi
-    drops as it moves off (section 1), so a transfer that got most of the way
+    drops as it moves off (see README.md), so a transfer that got most of the way
     and has to start again is the normal case here, not an edge one -- and a
     client that asks awkwardly should still get its file.
 
@@ -407,7 +407,7 @@ def _wanted_range(total: int) -> tuple[int, int]:
 
 
 # --------------------------------------------------------------------------
-# Editable settings (section 8)
+# Editable settings (see README.md)
 # --------------------------------------------------------------------------
 
 class Field:

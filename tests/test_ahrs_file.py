@@ -3,7 +3,7 @@
 #
 #   python tests/test_ahrs_file.py
 #
-# Walks the sequence section 13 of the requirements asks for: write -> cut the
+# Walks the sequence README.md of the requirements asks for: write -> cut the
 # file mid-block -> recover -> header flag -> merge -> slot names.
 # Everything happens in a temporary directory, so no hardware is involved.
 

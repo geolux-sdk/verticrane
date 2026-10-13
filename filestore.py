@@ -1,6 +1,6 @@
 # coding:UTF-8
 # The recording directory as the operator sees it: what exists, what belongs
-# together, and what has already been collected (sections 5.4 and 7).
+# together, and what has already been collected (see README.md).
 #
 # Kept out of the web layer because the recorder needs the housekeeping too --
 # it purges the trash when the card runs low, and nothing about that needs Flask.
@@ -138,7 +138,7 @@ def list_files(data_dir: str, gap_tolerance_s: float = 2.0) -> list[FileInfo]:
 
     A .partial is deliberately absent: it has not been verified yet, so handing
     it to the operator would mean handing over a file whose end may be missing
-    with no way to tell (section 6).
+    with no way to tell (see README.md).
     """
     infos: list[FileInfo] = []
     try:
@@ -195,7 +195,7 @@ def group_anchors(infos: list[FileInfo]) -> list[tuple[FileInfo, int]]:
     """(oldest member, member count) per group, for the merged-download links.
 
     The oldest is the anchor because it is the one whose name the merged file
-    already carries (section 5.4), so the link and the file the operator ends
+    already carries (see README.md), so the link and the file the operator ends
     up with agree.
     """
     oldest: dict[int, FileInfo] = {}
@@ -233,7 +233,7 @@ def locate(data_dir: str, name: str) -> Optional[str]:
 
 
 def move_to_trash(data_dir: str, names: list[str]) -> list[str]:
-    """Retire files the operator has downloaded (section 7).
+    """Retire files the operator has downloaded (see README.md).
 
     Not a delete: the vehicle's WiFi drops as it moves off, so a transfer that
     looked complete is worth keeping around for a few days. The operator's list
