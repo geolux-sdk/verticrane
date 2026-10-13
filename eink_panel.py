@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import socket
 import sys
@@ -322,10 +323,12 @@ def _body_recording(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
 def _body_measure(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     """Left alone and recording. The mounting guide has done its job."""
     tilt: Optional[float] = status.get("tilt_pct")
-    _centre(d, TITLE_H + 8, "-" if tilt is None else "{0:.3f}".format(tilt),
-            _font(46, bold=True), 0)
-    _centre(d, TITLE_H + 58, "% tilt", _font(14), 0)
-    _centre(d, TITLE_H + 78, _temp(status.get("temp_c")), _font(30, bold=True), 0)
+    text = "-- %" if tilt is None else "{0:.3f} %".format(tilt)
+    _centre(d, TITLE_H + 2, text, _fit(d, text, WIDTH - 12, 36, bold=True), 0)
+    for y, axis, key in ((72, "X", "roll"), (97, "Y", "pitch")):
+        text = "{0}  {1}".format(axis, _angle(status.get(key)))
+        _centre(d, y, text, _fit(d, text, WIDTH - 12, 22, bold=True), 0)
+    _centre(d, 124, _temp(status.get("temp_c")), _font(16), 0)
 
     line: str = "{0}  {1}   {2} smp".format(
         STATE_SHORT.get(str(status.get("state")), "?"),
@@ -358,6 +361,14 @@ def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
         d.rectangle([4, FOOT_Y + 4, WIDTH - 5, HEIGHT - 3], fill=0)
         _centre(d, FOOT_Y + 8, "NO NETWORK",
                 _fit(d, "NO NETWORK", WIDTH - 24, 16, bold=True), 255)
+
+
+def _angle(value: Optional[float]) -> str:
+    """Signed sensor angle in degrees; avoid misleading negative zero."""
+    if value is None or not math.isfinite(value):
+        return "--.---°"
+    value = round(value, 3)
+    return "{0:+.3f}°".format(0.0 if value == 0 else value)
 
 
 def _temp(value: Optional[float]) -> str:
@@ -497,6 +508,8 @@ class PanelThread:
             "position": snap.position,
             "state": snap.state,
             "tilt_pct": snap.tilt,
+            "roll": snap.roll,
+            "pitch": snap.pitch,
             "temp_c": snap.temp_c,
             "samples": snap.samples,
             "elapsed_s": snap.elapsed_s,
@@ -546,7 +559,9 @@ def main() -> int:
         "sensor_id": socket.gethostname()[:16],
         "position": args.position,
         "state": "recording",
-        "tilt_pct": 0.062,
+        "tilt_pct": 0.629,
+        "roll": 0.2,
+        "pitch": -0.3,
         "temp_c": 26.3,
         "samples": 12475, "elapsed_s": 8123,
         "ip": local_ip(),

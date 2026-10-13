@@ -446,6 +446,9 @@ FLAG_NNN.dat.partial    기록 중
 
 ### e-paper 미리보기 — 하드웨어 없이
 
+측정 화면은 합성 기울기(%)와 센서 X축 Roll / Y축 Pitch(부호 포함 소수점 세 자리, °)를
+함께 표시합니다. 각도 누락 시 `--.---°`로 표시하며 기본 갱신 주기는 60초입니다.
+
 ```bash
 python eink_panel.py --out panel.png --scale 3 --screen boot
 python eink_panel.py --out panel.png --screen install --position BASE

@@ -55,6 +55,8 @@ class _Recorder:
         position = "TOP"
         state = "maintenance"
         tilt = None
+        roll = 0.2
+        pitch = -0.3
         temp_c = None
         samples = 0
         elapsed_s = 0.0
@@ -71,6 +73,8 @@ def test_wakeups() -> None:
     """
     print("\n[2] 다음 갱신 예약")
     panel = ep.PanelThread(_Recorder(), {})
+    status = panel._status()
+    check("센서 각도가 패널에 전달된다", status["roll"] == 0.2 and status["pitch"] == -0.3)
 
     panel._started = time.monotonic()
     splash: Optional[float] = panel._next_wait({"booting": True})
@@ -107,7 +111,8 @@ def test_frames() -> None:
     print("\n[3] 프레임 렌더링")
     base: dict[str, Any] = {
         "sensor_id": "pi-test", "position": "TOP", "state": "recording",
-        "tilt_pct": 0.062, "temp_c": 26.3, "samples": 1200, "elapsed_s": 4.0,
+        "tilt_pct": 0.629, "roll": 0.2, "pitch": -0.3,
+        "temp_c": 26.3, "samples": 1200, "elapsed_s": 4.0,
         "ip": "192.168.0.19",
     }
     frames: dict[str, Any] = {}
@@ -131,6 +136,18 @@ def test_frames() -> None:
 
     check("주소가 없으면 NO NETWORK", ep.render(
         dict(base, ip=None), rotate=0) != frames["기록"])
+    check("각도 부호와 소수점", ep._angle(0.2) == "+0.200°" and ep._angle(-0.3) == "-0.300°")
+    check("음수 영점 제거", ep._angle(-0.0001) == "+0.000°")
+    check("누락 및 비정상 각도", all(ep._angle(v) == "--.---°"
+          for v in (None, float("nan"), float("inf"))))
+    measured = dict(base, elapsed_s=9999)
+    for key in ("roll", "pitch"):
+        changed = ep.render(dict(measured, **{key: 1.25}), rotate=0)
+        check(key + " 변화가 화면에 반영된다", changed.tobytes() != frames["측정"].tobytes())
+    for roll, pitch in ((None, None), (-180.0, 180.0), (0.0, -0.0001)):
+        for rotation in (0, 90, 180, 270):
+            img = ep.render(dict(measured, roll=roll, pitch=pitch), rotate=rotation)
+            check("각도 경계값/회전 {0}/{1}/{2}".format(roll, pitch, rotation), img.size == (200, 200))
 
 
 def main() -> int:
