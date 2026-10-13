@@ -1,7 +1,7 @@
 # coding:UTF-8
 # Self-check for the .ahrsbin format.
 #
-#   python test_ahrs_file.py
+#   python tests/test_ahrs_file.py
 #
 # Walks the sequence section 13 of the requirements asks for: write -> cut the
 # file mid-block -> recover -> header flag -> merge -> slot names.
@@ -13,6 +13,8 @@ import os
 import shutil
 import struct
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tempfile
 import time
 

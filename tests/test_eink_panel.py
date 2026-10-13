@@ -2,7 +2,7 @@
 # Self-check for the panel's two decisions: which screen a moment calls for,
 # and when the thread should next wake up (section 9).
 #
-#   python test_eink_panel.py
+#   python tests/test_eink_panel.py
 #
 # No hardware and no recorder: both decisions are pure functions of a status
 # snapshot, which is what makes them worth pinning down here. The frames
@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import time
 from typing import Any, Optional
 

@@ -234,8 +234,8 @@ def register(app: Flask) -> None:
         if len(members) == 1:
             return _send([members[0].path], members[0].name)
 
-        # Merged into one valid .ahrsbin so the operator gets a single file for
-        # a single measurement, named after its corrected start (section 5.4).
+        # Merge into one recording, keeping the first member's slot name and
+        # start timestamp in the header (section 5.4).
         fd, merged = tempfile.mkstemp(suffix=af.EXT, prefix="merge_")
         os.close(fd)
         try:
@@ -361,7 +361,7 @@ def _send(paths: list[str], display_name: str,
             for handle in handles:
                 handle.close()
             # After the descriptors, not before: Windows refuses to unlink a
-            # file that is still open, and dev/fake_card.py runs there.
+            # file that is still open, and tests/tools/fake_card.py runs there.
             if cleanup and os.path.exists(cleanup):
                 os.unlink(cleanup)
 

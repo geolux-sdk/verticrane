@@ -9,7 +9,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const INDEX = path.join(__dirname, "..", "index.html");
+const INDEX = path.join(__dirname, "..", "..", "bt", "web", "index.html");
 
 const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";

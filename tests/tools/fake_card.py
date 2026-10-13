@@ -2,8 +2,8 @@
 # A card full of recordings, and the operator's web pages served over it, on a
 # machine with no Pi and no sensor attached.
 #
-#   python dev/fake_card.py --serve
-#   python dev/fake_card.py --scenario collected --serve
+#   python tests/tools/fake_card.py --serve
+#   python tests/tools/fake_card.py --scenario collected --serve
 #
 # Everything the file list, the download and the settings pages do lives in
 # web/ and filestore.py, and neither touches the serial port or the panel. So
@@ -19,10 +19,11 @@ import argparse
 import os
 import shutil
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import time
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from loguru import logger
 

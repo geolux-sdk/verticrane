@@ -6,10 +6,9 @@
 #   python recorder.py --force recording    skip the HTTP wait and the settle wait
 #   python recorder.py --force maintenance  come up idle, as if someone connected
 #
-# Polls the sensor at 25 Hz, waits for the crane to settle, then appends 128-byte
-# blocks of 25 samples each. Nothing here ever renames a file that is open: the
-# timestamp gets fixed up during the next boot's recovery pass, because in the
-# field the power simply drops and there is no shutdown to hook.
+# Polls the sensor at 25 Hz, waits for the crane to settle, then appends 1232-byte
+# blocks of 25 samples each. A torn .partial is recovered on the next boot;
+# the original start timestamp in the header is preserved.
 #
 # The web layer calls note_http_request() when a valid request arrives; until it
 # exists, --force stands in for it.
@@ -38,6 +37,7 @@ import port_config
 import read_status
 import stability
 from hwt9037_485 import HWT9037_485
+from network_utils import local_ip as _local_ip
 
 DATA_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 LAST_KNOWN: str = ".lastknown"
@@ -206,15 +206,19 @@ class SensorLink:
         """
         warnings: list[str] = []
         if self.device is None:
-            return warnings
+            return ["센서 설정 확인 불가: 센서가 연결되지 않았습니다."]
         for reg, (label, expected, names) in EXPECTED_CONFIG.items():
+            actual: Optional[int] = None
             try:
-                if self.device.readReg(reg, 1) is None:
-                    continue
-            except Exception:                             # noqa: BLE001
-                continue
-            actual: Optional[int] = self.device.registerData.get(reg)
-            if actual is not None and actual != expected:
+                values = self.device.readReg(reg, 1)
+                if values:
+                    actual = values[0]
+            except Exception as exc:                      # noqa: BLE001
+                logger.debug("Config read failed at 0x{:02X}: {}", reg, exc)
+            if actual is None:
+                warnings.append("{0} 설정 확인 불가 (0x{1:02X} 읽기 실패)".format(label, reg))
+                logger.warning("Sensor configuration could not be verified at 0x{:02X}", reg)
+            elif actual != expected:
                 msg: str = "{0}이(가) {1}입니다. {2}이어야 합니다 (0x{3:02X})".format(
                     label, names.get(actual, str(actual)),
                     names.get(expected, str(expected)), reg)
@@ -834,18 +838,6 @@ def _link_up() -> bool:
         except OSError:
             continue          # down interfaces refuse the read; that is a "no"
     return False
-
-
-def _local_ip() -> Optional[str]:
-    # No packet is sent; this just asks the kernel which source address a route
-    # to the outside would use. None means nothing is up yet.
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(0.5)
-            sock.connect(("8.8.8.8", 80))
-            return sock.getsockname()[0]
-    except OSError:
-        return None
 
 
 def _free_mb(path: str) -> float:

@@ -1,6 +1,6 @@
 # systemd unit for the Verticrane tilt dashboard (Raspberry Pi).
 # Install:
-#   sudo cp ~/verticrane/verticrane-dashboard.service /etc/systemd/system/
+#   sudo cp ~/verticrane/dev/verticrane-dashboard.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now verticrane-dashboard
 # Adjust User= and the paths below if you did not clone to /home/pi/verticrane.
@@ -19,7 +19,7 @@ WorkingDirectory=/home/pi/verticrane
 # Uncomment to pin the serial port instead of auto-detection (the on-board UART on
 # GPIO14/15 is picked up automatically; a USB dongle needs naming here):
 # Environment=VERTICRANE_PORT=/dev/serial0
-ExecStart=/home/pi/verticrane/.venv/bin/python -m streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+ExecStart=/home/pi/verticrane/.venv/bin/python -m streamlit run dev/dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 Restart=always
 RestartSec=5
 

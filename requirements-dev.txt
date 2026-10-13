@@ -1,0 +1,6 @@
+# Runtime plus optional analysis/dashboard tools.
+-r requirements.txt
+streamlit>=1.58
+plotly>=6.8
+pandas>=2.3
+numpy>=1.26,<3

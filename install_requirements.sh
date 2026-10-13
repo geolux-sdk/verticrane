@@ -7,10 +7,19 @@
 #
 #   ./install_requirements.sh            create .venv and install
 #   ./install_requirements.sh --dry-run  print the commands without running them
+#   ./install_requirements.sh --dev      also install analysis/dashboard tools
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
+DRY_RUN=0
+for arg in "$@"; do
+    case "$arg" in
+        --dev) REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements-dev.txt" ;;
+        --dry-run) DRY_RUN=1 ;;
+        *) echo "Usage: $0 [--dev] [--dry-run]" >&2; exit 2 ;;
+    esac
+done
 VENV_DIR="${SCRIPT_DIR}/.venv"
 VENV_PY="${VENV_DIR}/bin/python"
 
@@ -24,7 +33,7 @@ if [ ! -f "${REQUIREMENTS_FILE}" ]; then
     exit 1
 fi
 
-if [ "${1:-}" = "--dry-run" ]; then
+if [ "${DRY_RUN}" -eq 1 ]; then
     echo "python3 -m venv --system-site-packages \"${VENV_DIR}\""
     echo "${VENV_PY} -m pip install --upgrade pip"
     echo "${VENV_PY} -m pip install -r \"${REQUIREMENTS_FILE}\""

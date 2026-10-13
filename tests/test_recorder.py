@@ -1,7 +1,7 @@
 # coding:UTF-8
 # Self-check for the recording loop's failure paths (sections 3, 6).
 #
-#   python test_recorder.py
+#   python tests/test_recorder.py
 #
 # No hardware and no sensor: a Recorder is built with a port that will never
 # open, which is deliberate -- the device has to keep going when the sensor is
@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tempfile
 import shutil
 

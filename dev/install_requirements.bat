@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "REQUIREMENTS_FILE=%~dp0requirements.txt"
+set "REQUIREMENTS_FILE=%~dp0..\requirements-dev.txt"
 
 where py >nul 2>nul
 if %ERRORLEVEL% EQU 0 (

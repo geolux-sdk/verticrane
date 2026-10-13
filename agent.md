@@ -48,8 +48,9 @@ can run while it does.
 configuration, panel test tools, `.dat` → CSV conversion, and `devmode.sh`,
 which stops the recorder, runs a command, and restarts it from a trap.
 
-`dev/` scripts sit one level down, so each puts the repo root on `sys.path` in two
-explicit lines before importing runtime modules.
+`tests/` holds software checks, `tests/hardware/` holds hardware probes, and
+`tests/tools/` holds synthetic-data demos. Test entrypoints resolve imports from
+their own location. SCL3300 is retired; do not restore its driver or tools.
 
 ## Working Rules
 
@@ -98,15 +99,19 @@ explicit lines before importing runtime modules.
 
 ## Validation
 
-No hardware needed:
+No hardware needed (runtime dependencies; --all also needs dev dependencies and Node):
 
 ```bash
-python test_ahrs_file.py     # format: write, tear, recover, merge, slot names
-python test_eink_panel.py    # panel: state -> screen, wake scheduling, frames
-python test_stability.py     # judge: 0/360 seam, window, motion rejection
+python tests/run.py
+python tests/run.py --all
+python tests/test_ahrs_file.py     # format: write, tear, recover, merge, slot names
+python tests/test_eink_panel.py    # panel: state -> screen, wake scheduling, frames
+python tests/test_stability.py     # judge: 0/360 seam, window, motion rejection
 python stability.py data/*.csv   # replay recorded logs against the limits
 python eink_panel.py --out panel.png --scale 3 --screen boot
 ```
 
-On the Pi (`./test.sh` runs all of it, sensor included). The device is at
+On the Pi, `./test.sh` runs software checks only. Use
+`./dev/devmode.sh ./test.sh --hardware` for sensor checks with service restoration.
+Install developer dependencies first (`./install_requirements.sh --dev`). The device is at
 `pi@192.168.0.19`; deploy with `git push` then `./update.sh` there.

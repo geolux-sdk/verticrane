@@ -2,9 +2,9 @@
 # Self-test: exercise the building blocks the dashboard relies on and report
 # pass/fail for each, so a fresh install (e.g. on the Raspberry Pi) can be verified.
 #
-#   python test.py                  # run all checks (sensor must be connected)
-#   python test.py --port /dev/ttyUSB0
-#   python test.py --no-hardware    # software-only checks (no sensor needed)
+#   python tests/hardware/sensor_check.py                  # run all checks (sensor must be connected)
+#   python tests/hardware/sensor_check.py --port /dev/ttyUSB0
+#   python tests/hardware/sensor_check.py --no-hardware    # software-only checks (no sensor needed)
 #
 # Checks: port resolution (port_config), settings (app_config), CSV analysis
 # (analyze_tilt), logger module import (log_tilt), and the device link + a few
@@ -15,18 +15,18 @@ import argparse
 import math
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import tempfile
 import time
 
-# dev/ tools live one level down, so put the repo root on the import path
-# before reaching for app_config, ahrs_file and the rest.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import analyze_tilt
+from dev import analyze_tilt
 import app_config
 import read_status
 
 from port_config import add_port_argument, resolve_port
+from ahrs_file import tilt_pct as resultant_slope_pct
 
 # Touchstone columns written by log_tilt.py (used by the synthetic analysis check).
 CSV_COLUMNS = ("timestamp,elapsed_s,Roll_deg,Pitch_deg,Yaw_deg,slope_pct,"
@@ -48,13 +48,6 @@ def check(name, fn):
     print("[{0}] {1} - {2}".format("PASS" if ok else "FAIL", name, lines[0]))
     for extra in lines[1:]:
         print("        {0}".format(extra))
-
-
-def resultant_slope_pct(roll_deg, pitch_deg):
-    # Same formula log_tilt.py records; the measurement path depends on it.
-    sx = math.tan(math.radians(roll_deg))
-    sy = math.tan(math.radians(pitch_deg))
-    return math.hypot(sx, sy) * 100.0
 
 
 def _stats(xs):
@@ -94,7 +87,7 @@ def check_analyze():
 def check_logger_module():
     # The dashboard launches log_tilt.py as a subprocess; confirm it imports
     # (which also loads hwt9037_485, port_config, analyze_tilt).
-    import log_tilt
+    from dev import log_tilt
     ok = hasattr(log_tilt, "resultant_slope_pct") and hasattr(log_tilt, "main")
     return ok, "log_tilt 및 의존 모듈 로드 OK"
 

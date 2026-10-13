@@ -23,7 +23,7 @@ cd "${ROOT}"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
-APT_PACKAGES=(python3-venv python3-full fonts-nanum bluez python3-dbus python3-gi)
+APT_PACKAGES=(python3-venv python3-full python3-spidev python3-gpiozero python3-lgpio fonts-nanum bluez python3-dbus python3-gi)
 BOOT_CONFIG=/boot/firmware/config.txt
 BOOT_CMDLINE=/boot/firmware/cmdline.txt
 

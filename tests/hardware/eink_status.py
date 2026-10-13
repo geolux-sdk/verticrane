@@ -21,17 +21,16 @@ from typing import Optional
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-# dev/ tools live one level down, so put the repo root on the import path
-# before reaching for app_config, ahrs_file and the rest.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app_config
 import gdey0154d67 as epd
 import port_config
 import read_status
 
-from log_tilt import resultant_slope_pct
+from dev.log_tilt import resultant_slope_pct
 
 SAMPLE_RATE_HZ = 25.0
 SAMPLE_PERIOD_S = 1.0 / SAMPLE_RATE_HZ

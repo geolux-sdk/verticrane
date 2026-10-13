@@ -10,7 +10,6 @@
 
 import argparse
 import csv
-import math
 import os
 import time
 import sys
@@ -19,9 +18,10 @@ import sys
 # before reaching for app_config, ahrs_file and the rest.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import analyze_tilt
+from dev import analyze_tilt
+from ahrs_file import tilt_pct
+import read_status
 
-from hwt9037_485 import HWT9037_485
 from port_config import add_port_argument, resolve_port
 
 
@@ -31,9 +31,6 @@ OUTPUT_DIR = "data"
 
 # Resolved from --port / VERTICRANE_PORT / auto-detect in main().
 PORT_NAME = None
-DEVICE_ADDR = 0x50
-# Operational baud is 115200 (set via configure_sensor.py); 9600 is the factory fallback.
-CANDIDATE_BAUDS = [115200, 9600]
 
 # Sensor bandwidth is 10 Hz; sample above 2x that (Nyquist) plus a guard band.
 SAMPLE_RATE_HZ = 25.0
@@ -44,27 +41,13 @@ PROGRESS_EVERY_S = 30.0
 
 
 def connectAutoBaud():
-    for baud in CANDIDATE_BAUDS:
-        device = HWT9037_485(PORT_NAME, baud, DEVICE_ADDR, lambda d: None)
-        device.openDevice()
-        if not device.isOpen:
-            continue
-        device.readReg(0x2E, 1)  # VERSION confirms the link
-        if device.registerData.get(0x2E) is not None:
-            print("Connected at {0} bps".format(baud))
-            return device, baud
-        print("No response at {0} bps".format(baud))
-        device.closeDevice()
-    return None, None
+    return read_status.connectAutoBaud(PORT_NAME)
 
 
 def resultant_slope_pct(roll_deg, pitch_deg):
-    # Combined tilt as a slope percentage, direction-independent.
     if roll_deg is None or pitch_deg is None:
         return None
-    sx = math.tan(math.radians(roll_deg))
-    sy = math.tan(math.radians(pitch_deg))
-    return math.hypot(sx, sy) * 100.0
+    return tilt_pct(roll_deg, pitch_deg)
 
 
 def main():

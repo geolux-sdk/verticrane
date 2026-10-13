@@ -5,7 +5,7 @@
             "name": "Format self-check (no hardware)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_ahrs_file.py",
+            "program": "${workspaceFolder}/tests/test_ahrs_file.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": true
@@ -14,7 +14,7 @@
             "name": "Stability self-check (no hardware)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_stability.py",
+            "program": "${workspaceFolder}/tests/test_stability.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": true
@@ -43,7 +43,7 @@
             "name": "Dashboard self-check (dev)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/dev/test.py",
+            "program": "${workspaceFolder}/tests/hardware/sensor_check.py",
             "args": ["--no-hardware"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",

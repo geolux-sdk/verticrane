@@ -1,7 +1,7 @@
 # coding:UTF-8
 # Self-check for the stability judge.
 #
-#   python test_stability.py
+#   python tests/test_stability.py
 #
 # The interesting cases are the ones that are easy to get wrong: the 0/360
 # angle seam, a window that has not filled yet, and making sure real motion is
@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import math
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import stability as st
 

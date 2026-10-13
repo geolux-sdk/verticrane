@@ -1,4 +1,4 @@
-# HWT9037-485 tilt sensor tooling dependencies.
+# HWT9037-485 recorder runtime dependencies.
 # Install with:  python -m pip install -r requirements.txt
 
 # Sensor communication (Modbus RTU over RS-485)
@@ -15,8 +15,5 @@ flask>=3.0
 # which pip cannot build. Only required if bt/ is deployed; see bt/INTEGRATION.md.
 # bluezero==0.9.1
 
-# Analysis dashboard (dashboard.py) -- developer only, not started by systemd
-streamlit>=1.58
-plotly>=6.8
-pandas>=2.3
-numpy>=1.26,<3            # Python 3.13 (Raspberry Pi OS trixie) has no numpy 1.x wheels
+# Panel image rendering (also used for previews without hardware).
+Pillow>=10

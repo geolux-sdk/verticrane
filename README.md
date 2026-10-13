@@ -41,6 +41,7 @@
 | `web/` | 운영자 웹 (Flask, 8080). `routes.py` + `templates/` |
 | `eink_panel.py` | e-paper 화면 구성과 갱신 스레드 |
 | `gdey0154d67.py` | e-paper 드라이버 (SSD1681, SPI0) |
+| `network_utils.py` | 기록기·패널 공통 IP 조회 |
 | `read_status.py` | 센서 연결·상태 읽기 **(recorder가 사용)** |
 | `hwt9037_485.py` | 장치 모델 (Modbus RTU) |
 | `port_config.py` | 시리얼 포트 결정 |
@@ -440,9 +441,20 @@ FLAG_NNN.dat.partial    기록 중
 | `dashboard.py` `pages/setup.py` | Streamlit 분석 대시보드 |
 | `analyze_tilt.py` | CSV 분석 (통계·FFT) |
 | `log_tilt.py` | CSV 직접 기록 (구형) |
-| `eink_status.py` `eink_test.py` | 패널 시험 |
-| `test.py` | 대시보드 자가 점검 |
 | `install_requirements.bat` | Windows 개발 환경 |
+
+시험 코드는 `tests/`에 모았습니다. `tests/hardware/`는 센서·패널·GPIO 직접 시험,
+`tests/tools/fake_card.py`는 합성 기록으로 웹 화면을 확인하는 도구,
+`tests/ble_web/`는 BLE 웹 UI 자동 검사입니다.
+
+운영 의존성은 `requirements.txt`, 분석·대시보드 의존성은 `requirements-dev.txt`입니다.
+Pi 운영 설치는 `./install_requirements.sh`, 개발 도구 설치는
+`./install_requirements.sh --dev` 또는 Windows의 `dev\install_requirements.bat`를 사용합니다.
+개발 의존성까지 갱신하려면 `./update.sh --dev`를 사용합니다.
+SPI/GPIO 의존성은 `install.sh`에서 OS 패키지로 설치합니다.
+
+SCL3300 지원과 전용 비교·시험 코드는 제거했습니다. `SENSOR_COMPARISON.md`와
+동명의 PPTX는 과거 실험 기록으로만 보존하며, 현재 운용 센서는 HWT9037-485입니다.
 
 ### e-paper 미리보기 — 하드웨어 없이
 
@@ -470,16 +482,22 @@ python stability.py data/*.csv --gyro-rms 0.1     # 기준을 바꿔 시험
 ### 하드웨어 없이 — 언제나 통과해야 합니다
 
 ```bash
-python test_ahrs_file.py     # 포맷: 쓰기 → 자르기 → 복구 → 복구 표식 → 병합 → 슬롯 이름
-python test_stability.py     # 판정: 0/360 경계, 윈도우 경계, 움직임 거부
-python test_eink_panel.py    # 패널: 상태→화면, 갱신 예약, 다섯 화면 렌더링
+python tests/run.py              # 운영 코드 소프트웨어 검사 (센서 접근 없음)
+python tests/run.py --all        # 개발 분석 + BLE 웹 검사 포함 (개발 의존성, Node.js 필요)
+python tests/test_ahrs_file.py     # 포맷: 쓰기 → 자르기 → 복구 → 복구 표식 → 병합 → 슬롯 이름
+python tests/test_stability.py     # 판정: 0/360 경계, 윈도우 경계, 움직임 거부
+python tests/test_eink_panel.py    # 패널: 상태→화면, 갱신 예약, 다섯 화면 렌더링
 ```
 
 ### 장비에서
 
 ```bash
-./test.sh                    # 위 셋 + 센서 통신 점검
+./test.sh                    # 운영 소프트웨어 검사만; 서비스 중지 불필요
+./dev/devmode.sh ./test.sh --hardware --seconds 10  # 센서 검사 후 서비스 복구
 ```
+
+센서 검사는 개발 의존성이 필요합니다. `--hardware`는 기록 서비스가 실행 중이면
+거부합니다. 세부 실행 방법은 [tests/README.md](tests/README.md)를 참고하세요.
 
 ### 손으로 확인해야 하는 것
 

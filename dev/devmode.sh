@@ -31,11 +31,20 @@ restore() {
         }
     fi
 }
-trap restore EXIT INT TERM
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ "${was_active}" -eq 1 ]; then
     echo "Stopping ${SERVICE} to free the serial port..." >&2
-    sudo systemctl stop "${SERVICE}"
+    if ! sudo systemctl stop "${SERVICE}"; then
+        echo "Could not stop ${SERVICE}; refusing to run the tool." >&2
+        exit 1
+    fi
+    if systemctl is-active --quiet "${SERVICE}"; then
+        echo "${SERVICE} is still active; refusing to run the tool." >&2
+        exit 1
+    fi
     # systemd sends SIGTERM and the recorder finalises the file it was writing.
     sleep 2
 else

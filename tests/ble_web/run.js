@@ -1,5 +1,5 @@
 /*
- * 웹앱 테스트 실행기:  node web/tests/run.js
+ * 저장소 루트에서 실행: node tests/ble_web/run.js
  *
  * 각 테스트는 별도 프로세스에서 돌린다 — index.html 의 스크립트가 전역
  * (setInterval·document 등)에 붙어 살아 있어서, 한 프로세스에서 두 번 실행하면

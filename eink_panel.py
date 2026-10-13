@@ -33,6 +33,7 @@ from typing import Any, Optional
 
 from loguru import logger
 from PIL import Image, ImageChops, ImageDraw, ImageFont
+from network_utils import local_ip
 
 WIDTH: int = 200
 HEIGHT: int = 200
@@ -348,7 +349,7 @@ def _footer(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     """The address, which is the only thing here anyone types.
 
     No clock: an unsynced one is worse than none, and the trustworthy time is in
-    the filename. No SSID either -- connected, the operator is already on that
+    the recording header. No SSID either -- connected, the operator is already on that
     network and knows it; disconnected, there is no network it "should" join,
     since NetworkManager takes whichever is in range. This line answers the
     question that has an answer: reachable, and at what address.
@@ -378,17 +379,6 @@ def _temp(value: Optional[float]) -> str:
 def _hms(seconds: float) -> str:
     s = int(seconds)
     return "{0:d}:{1:02d}:{2:02d}".format(s // 3600, (s // 60) % 60, s % 60)
-
-
-def local_ip() -> Optional[str]:
-    """The address the operator would type. None when the WiFi has dropped."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.settimeout(0.5)
-            s.connect(("8.8.8.8", 80))       # no packet is sent; just picks a route
-            return s.getsockname()[0]
-    except OSError:
-        return None
 
 
 # --------------------------------------------------------------------------
@@ -447,6 +437,7 @@ class PanelThread:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._last_frame: Optional[bytes] = None
+        self._retry_at: float = 0.0
         self._thread: Optional[threading.Thread] = None
         self._started: float = time.monotonic()
 
@@ -475,12 +466,20 @@ class PanelThread:
             except Exception as exc:                      # noqa: BLE001
                 # A missing or broken panel must never stop the recording.
                 logger.error("Panel update failed: {}", exc)
+                self._retry_at = time.monotonic() + 30.0
             if self._stop.is_set():
                 break
             self._wake.wait(self._next_wait(status))
             self._wake.clear()
 
     def _next_wait(self, status: Optional[dict[str, Any]]) -> Optional[float]:
+        wait = self._screen_wait(status)
+        if self._retry_at:
+            retry = max(0.0, self._retry_at - time.monotonic())
+            return retry if wait is None else min(wait, retry)
+        return wait
+
+    def _screen_wait(self, status: Optional[dict[str, Any]]) -> Optional[float]:
         """Seconds until the next frame is due, or None to wait for an event.
 
         None is the normal answer. Event.wait(None) blocks until refresh_now()
@@ -530,14 +529,20 @@ class PanelThread:
         render that turns out to be redundant is the cheap half.
         """
         status: dict[str, Any] = self._status()
+        if time.monotonic() < self._retry_at:
+            return status
         img = render(status,
                      contact_face=str(self.cfg.get("contact_face", "bottom")),
                      rotate=int(self.cfg.get("panel_rotation", 90)))
         frame: bytes = img.tobytes()
         if frame == self._last_frame:
+            self._retry_at = 0.0
             return status
-        self._last_frame = frame
-        show(img)
+        if show(img):
+            self._last_frame = frame
+            self._retry_at = 0.0
+        else:
+            self._retry_at = time.monotonic() + 30.0
         return status
 
 
