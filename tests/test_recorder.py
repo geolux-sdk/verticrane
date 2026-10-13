@@ -67,6 +67,7 @@ def test_write_failure(tmp: str) -> None:
     rec = recorder.Recorder("/dev/null", app_config.RECORDER_DEFAULTS.copy(), tmp)
     writer = _RefusingWriter(os.path.join(tmp, "TOP_000.dat.partial"))
     rec.writer = writer                       # type: ignore[assignment]
+    rec._set_state(recorder.RECORDING)
     rec._record_start_mono = 0.0
     rec._pending = _full_block()
 
@@ -82,6 +83,16 @@ def test_write_failure(tmp: str) -> None:
     check("한 번만 시도한다", writer.writes == 1, str(writer.writes))
     check("writer 를 닫는다", writer.closed)
     check("기록을 멈춘다", rec.writer is None)
+    check("오류 상태로 전환한다", rec.state == recorder.ERROR)
+    check("저장 공간 부족을 구분한다", rec.status.error_reason == "저장 공간 부족")
+    for i in range(100):
+        rec._append_sample(i * 0.04, _full_block()[0][1])
+    check("후속 샘플을 쌓지 않는다", not rec._pending)
+    from unittest.mock import patch
+    with patch.object(rec, "_poll_once") as poll, patch.object(recorder.time, "sleep"):
+        rec._next_time_save = rec._next_purge = float("inf")
+        rec._tick()
+    check("오류 이후 측정을 재개하지 않는다", not poll.called)
     check("쓰지 못한 샘플을 버린다", not rec._pending, str(len(rec._pending)))
     check("오류를 상태에 남긴다", "No space left" in (rec.status.error or ""),
           repr(rec.status.error))

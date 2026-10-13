@@ -2,7 +2,8 @@
 {% block body %}
 
 {% set STATE_LABEL = {"waiting_http": "접속 대기", "waiting_stable": "안정화 대기",
-                      "recording": "기록 중", "maintenance": "대기 (접속됨)"} %}
+                      "recording": "기록 중", "maintenance": "대기 (접속됨)",
+                      "error": "오류 — 기록 중지"} %}
 
 <div class="card">
   <h2>상태</h2>
@@ -28,7 +29,13 @@
   </p>
 
   {% if status.error %}
-    <div class="notice bad" style="margin-top:12px">{{ status.error }}</div>
+    <div class="notice bad" style="margin-top:12px">
+      {% if status.error_reason %}<b>{{ status.error_reason }}</b><br>{% endif %}
+      {{ status.error }}
+      {% if status.state == "error" %}
+        <br>기록을 중지했습니다. 원인을 확인한 후 전원을 껐다 켜세요.
+      {% endif %}
+    </div>
   {% endif %}
 
   {% if status.position == "UNSET" %}

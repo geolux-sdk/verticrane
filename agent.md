@@ -31,7 +31,7 @@ can run while it does.
 
 | File | Role |
 |---|---|
-| `recorder.py` | Recording loop and the four-state boot sequence (README.md) |
+| `recorder.py` | Recording loop, boot sequence and storage error state (README.md) |
 | `ahrs_file.py` | `.dat` format: header, blocks, slot names, recovery, merge (README.md) |
 | `stability.py` | Decides when recording may begin (README.md) |
 | `filestore.py` | File listing, continuity groups, trash (README.md) |

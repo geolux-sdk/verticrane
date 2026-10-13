@@ -78,6 +78,18 @@ WAITING_HTTP: str = "waiting_http"
 WAITING_STABLE: str = "waiting_stable"
 RECORDING: str = "recording"
 MAINTENANCE: str = "maintenance"
+ERROR: str = "error"
+
+
+def storage_error_reason(exc: OSError) -> str:
+    import errno
+    return {
+        errno.ENOSPC: "저장 공간 부족",
+        errno.EROFS: "저장 장치 쓰기 금지",
+        errno.EIO: "저장 장치 입출력 오류",
+        errno.EACCES: "파일 쓰기 권한 없음",
+        errno.EPERM: "파일 쓰기 권한 없음",
+    }.get(exc.errno, "파일 저장 실패")
 
 RECONNECT_MIN_S: float = 1.0
 RECONNECT_MAX_S: float = 30.0
@@ -291,6 +303,7 @@ class Status:
     stability: dict[str, Any] = field(default_factory=dict)
     free_mb: float = 0.0
     error: Optional[str] = None
+    error_reason: Optional[str] = None
 
 
 class Recorder:
@@ -304,6 +317,7 @@ class Recorder:
         self.status = Status()
         self.stop_event = threading.Event()
         self._http_seen = threading.Event()
+        self._start_lock = threading.Lock()
         self._want_stop = threading.Event()
         self._want_discard = threading.Event()
         self._lock = threading.Lock()
@@ -356,12 +370,13 @@ class Recorder:
         browser left open in the vehicle would throw away a real measurement the
         moment the WiFi came back into range.
         """
-        if not self._http_seen.is_set():
-            logger.info("HTTP request seen; auto-recording is suppressed")
-        self._http_seen.set()
-        if self.state == RECORDING:
-            logger.info("Operator connected while recording; discarding this recording")
-            self._want_discard.set()
+        with self._start_lock:
+            if not self._http_seen.is_set():
+                logger.info("HTTP request seen; auto-recording stopped")
+            self._http_seen.set()
+            if self.state == RECORDING:
+                logger.info("Operator connected while recording; discarding this recording")
+                self._want_discard.set()
 
     @property
     def position(self) -> int:
@@ -542,7 +557,10 @@ class Recorder:
                 logger.info("Stop requested from the web")
                 self._stop_recording()
                 self._set_state(MAINTENANCE)
-        if self.state == MAINTENANCE:
+        if self.state == WAITING_STABLE and self._http_seen.is_set():
+            logger.info("Operator connected while settling; auto-recording stopped")
+            self._set_state(MAINTENANCE)
+        if self.state in (MAINTENANCE, ERROR):
             # Idle on purpose: someone is here to collect files, so do not add
             # SD-card writes underneath them.
             time.sleep(0.2)
@@ -642,6 +660,8 @@ class Recorder:
     # -- block assembly ---------------------------------------------------
 
     def _append_sample(self, mono: float, sample: af.Sample) -> None:
+        if self.state != RECORDING or self.writer is None:
+            return
         elapsed_ms: float = (mono - self._record_start_mono) * 1000.0
         self._pending.append((elapsed_ms, sample))
         if len(self._pending) >= af.SAMPLES_PER_BLOCK:
@@ -681,10 +701,13 @@ class Recorder:
             # The card refused these 25 samples, so they are gone whatever
             # happens next. Saying so in the log is the honest version of
             # losing them.
-            logger.error("Write failed, dropping {} samples: {}", block.count, exc)
+            self.status.error_reason = storage_error_reason(exc)
+            logger.error("Write failed: file={}, dropping {} samples, reason={}: {}",
+                         self.writer.path, block.count, self.status.error_reason, exc)
             self.status.error = str(exc)
             self._pending.clear()
             self._block_flags = 0
+            self._set_state(ERROR)
             self._stop_recording()
             return
         self.status.samples += block.count
@@ -697,6 +720,16 @@ class Recorder:
     # -- recording lifecycle ----------------------------------------------
 
     def _start_recording(self) -> None:
+        with self._start_lock:
+            if self.state == ERROR:
+                return
+            if self._http_seen.is_set():
+                logger.info("Operator connected; recording will not start")
+                self._set_state(MAINTENANCE)
+                return
+            self._open_recording()
+
+    def _open_recording(self) -> None:
         self._record_start_epoch = self.time.now()
         self._record_start_mono = time.monotonic()
         slot: int = af.next_slot(self.data_dir)
@@ -796,8 +829,9 @@ class Recorder:
         logger.error("Only {:.0f} MB free (< {} MB); stopping the recording",
                      free, self.cfg["min_free_mb"])
         self.status.error = "디스크 여유 부족"
+        self.status.error_reason = "저장 공간 부족"
+        self._set_state(ERROR)
         self._stop_recording()
-        self._set_state(MAINTENANCE)
 
     def _set_state(self, state: str) -> None:
         if state != self.state:

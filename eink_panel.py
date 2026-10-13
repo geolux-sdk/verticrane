@@ -50,6 +50,7 @@ SCREEN_INSTALL: str = "install"   # being fitted: which way up, which face down
 SCREEN_RECORDING: str = "record"  # recording has begun; no reading to show yet
 SCREEN_MEASURE: str = "measure"   # left alone: what it reads
 SCREEN_BRAND: str = "brand"       # operator is connected: nothing to decide here
+SCREEN_ERROR: str = "error"
 
 # The boot frame is the brand frame inverted, and that is the whole point. The
 # panel keeps its image without power, so whatever was on it before the power
@@ -225,6 +226,7 @@ def draw_orientation(d: ImageDraw.ImageDraw, x: int, y: int,
 STATE_SHORT: dict[str, str] = {
     "waiting_http": "WAIT", "waiting_stable": "SETTLE",
     "recording": "REC", "maintenance": "IDLE",
+    "error": "ERROR",
 }
 
 
@@ -245,6 +247,8 @@ def pick_screen(status: dict[str, Any]) -> str:
     The order matters: booting outranks everything because for those first
     seconds the only question anyone has is whether the device came up.
     """
+    if status.get("state") == "error":
+        return SCREEN_ERROR
     if status.get("booting"):
         return SCREEN_BOOT
     state: Any = status.get("state")
@@ -264,7 +268,9 @@ def render(status: dict[str, Any], contact_face: str = "bottom",
 
     _title(d, status)
     screen: str = pick_screen(status)
-    if screen in (SCREEN_BRAND, SCREEN_BOOT):
+    if screen == SCREEN_ERROR:
+        _body_error(d, status)
+    elif screen in (SCREEN_BRAND, SCREEN_BOOT):
         _body_brand(d)
     elif screen == SCREEN_RECORDING:
         _body_recording(d, status)
@@ -306,6 +312,19 @@ def _body_install(d: ImageDraw.ImageDraw, contact_face: str) -> None:
     rule, which read as a mistake next to every other screen.
     """
     draw_orientation(d, 27, TITLE_H + 4, contact_face, scale=1.20)
+
+
+def _body_error(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    lines = [
+        ("기록 중지", "RECORDING STOPPED", 44, 21),
+        (status.get("error_reason") or "파일 저장 실패", "STORAGE ERROR", 83, 16),
+        ("원인 확인 후", "CHECK STORAGE", 119, 14),
+        ("전원을 껐다 켜세요", "POWER OFF / ON", 140, 14),
+    ]
+    for text_ko, text_en, y, size in lines:
+        text, korean = _label(text_ko, text_en)
+        font = _fit(d, text, WIDTH - 12, size, korean=korean)
+        _centre(d, y, text, font, 0)
 
 
 def _body_recording(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
@@ -506,6 +525,7 @@ class PanelThread:
             "sensor_id": snap.sensor_id,
             "position": snap.position,
             "state": snap.state,
+            "error_reason": getattr(snap, "error_reason", None),
             "tilt_pct": snap.tilt,
             "roll": snap.roll,
             "pitch": snap.pitch,
