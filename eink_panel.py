@@ -331,8 +331,8 @@ def _body_sensor(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
 def _body_error(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
     lines = [
         ("기록 중지", "RECORDING STOPPED", 44, 21),
-        (status.get("error_reason") or "파일 저장 실패", "STORAGE ERROR", 83, 16),
-        ("원인 확인 후", "CHECK STORAGE", 119, 14),
+        (status.get("error_reason") or "장치 오류", "DEVICE ERROR", 83, 16),
+        ("원인 확인 후", "CHECK DEVICE", 119, 14),
         ("전원을 껐다 켜세요", "POWER OFF / ON", 140, 14),
     ]
     for text_ko, text_en, y, size in lines:

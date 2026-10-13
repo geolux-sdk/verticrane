@@ -503,11 +503,14 @@ class Recorder:
     def run(self, force: Optional[str] = None, run_seconds: Optional[float] = None) -> int:
         self.recover_leftovers()
 
-        if not self.sensor.connect() and self.fail_on_no_sensor:
-            logger.error("No sensor on {}", self.sensor.port)
-            return 1
-
-        if force == MAINTENANCE:
+        if not self.sensor.connect():
+            logger.error("No sensor response at startup on {}", self.sensor.port)
+            self.status.error_reason = "센서 통신 실패"
+            self.status.error = "시작할 때 센서가 응답하지 않았습니다: {}".format(self.sensor.port)
+            self._set_state(ERROR)
+            if self.fail_on_no_sensor:
+                return 1
+        elif force == MAINTENANCE:
             self._set_state(MAINTENANCE)
         elif force in (RECORDING, WAITING_STABLE):
             self._set_state(WAITING_STABLE)
