@@ -451,7 +451,8 @@ FLAG_NNN.dat.partial    기록 중
 Pi 운영 설치는 `./install_requirements.sh`, 개발 도구 설치는
 `./install_requirements.sh --dev` 또는 Windows의 `dev\install_requirements.bat`를 사용합니다.
 개발 의존성까지 갱신하려면 `./update.sh --dev`를 사용합니다.
-SPI/GPIO 의존성은 `install.sh`에서 OS 패키지로 설치합니다.
+SPI/GPIO 의존성과 한글 폰트(`fonts-nanum`)는 `install.sh`에서 OS 패키지로 설치합니다.
+`install_requirements.sh`는 Python 가상환경과 Python 패키지만 설치합니다.
 
 SCL3300 지원과 전용 비교·시험 코드는 제거했습니다. `SENSOR_COMPARISON.md`와
 동명의 PPTX는 과거 실험 기록으로만 보존하며, 현재 운용 센서는 HWT9037-485입니다.
