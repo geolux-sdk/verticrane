@@ -1,9 +1,9 @@
 # coding:UTF-8
 # Collect every recording off one or more devices, in one command.
 #
-#   python collect.py 192.168.0.19
-#   python collect.py 192.168.0.19 192.168.0.20 192.168.0.21 --out ./2026-08-28
-#   python collect.py 192.168.0.19 --keep        # download but do not retire
+#   python pc/collect.py 192.168.0.19
+#   python pc/collect.py 192.168.0.19 192.168.0.20 192.168.0.21 --out ./2026-08-28
+#   python pc/collect.py 192.168.0.19 --keep        # download but do not retire
 #
 # Runs on the operator's laptop, not on the device. Standard library only, so
 # there is nothing to install on a machine that is about to be driven to a site.
@@ -179,7 +179,7 @@ def main() -> int:
     ap.add_argument("--out", default="verticrane-data",
                     help="받을 폴더 (기본: ./verticrane-data). 장비별로 하위 폴더가 생깁니다")
     ap.add_argument("--keep", action="store_true",
-                    help="받기만 하고 장비에서 은퇴시키지 않습니다")
+                    help="받은 뒤에도 장비의 파일 목록에 유지합니다")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)

@@ -48,6 +48,9 @@ can run while it does.
 configuration, panel test tools, `.dat` → CSV conversion, and `devmode.sh`,
 which stops the recorder, runs a command, and restarts it from a trap.
 
+**PC tools (`pc/`)** — `collect.py` runs on the operator's PC/laptop and collects
+recordings through the Pi HTTP API. It uses only the Python standard library.
+
 `tests/` holds software checks, `tests/hardware/` holds hardware probes, and
 `tests/tools/` holds synthetic-data demos. Test entrypoints resolve imports from
 their own location. SCL3300 is retired; do not restore its driver or tools.

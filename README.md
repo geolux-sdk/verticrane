@@ -49,6 +49,16 @@
 | `verticrane-recorder.service` | systemd 유닛 |
 | `install.sh` `install_requirements.sh` `update.sh` `test.sh` | 설치·배포·점검 |
 
+### PC용 도구 (`pc/`)
+
+| 파일 | 역할 |
+|---|---|
+| `collect.py` | 운영자의 PC·노트북에서 Pi의 기록 파일 회수. Python 표준 라이브러리만 사용 |
+
+PC에서 저장소 루트 기준으로 `python pc/collect.py <장비IP>`를 실행합니다.
+`pc/collect.py` 파일만 PC에 복사했다면 해당 폴더에서 `python collect.py <장비IP>`로
+실행할 수 있습니다. 내려받는 파일의 상대 경로는 명령을 실행한 폴더를 기준으로 합니다.
+
 ### 데이터 (`data/`)
 
 | 이름 | 내용 |
@@ -397,16 +407,16 @@ SSH 접속과 로그 조회는 브라우저 접속으로 취급되지 않으므�
 
 **시작하는 API는 없습니다** ([2. 동작 개요](#2-동작-개요) 참조).
 
-### 한 번에 받아오기 — `collect.py`
+### PC에서 한 번에 받아오기 — `pc/collect.py`
 
 사람이 트리거하면 목록 조회부터 회수 확인까지 알아서 끝냅니다. 표준 라이브러리만
 쓰므로 현장에 들고 갈 노트북에 설치할 것이 없습니다.
 
 ```bash
-python collect.py 192.168.0.19                       # 한 대
-python collect.py 10.0.0.11 10.0.0.12 10.0.0.13      # 크레인 한 대 분(3기)
-python collect.py 192.168.0.19 --out ./2026-08-28    # 받을 폴더 지정
-python collect.py 192.168.0.19 --keep                # 받은 뒤에도 장비의 파일 목록에 유지
+python pc/collect.py 192.168.0.19                       # 한 대
+python pc/collect.py 10.0.0.11 10.0.0.12 10.0.0.13      # 크레인 한 대 분(3기)
+python pc/collect.py 192.168.0.19 --out ./2026-08-28    # 받을 폴더 지정
+python pc/collect.py 192.168.0.19 --keep                # 받은 뒤에도 장비의 파일 목록에 유지
 ```
 
 ```
