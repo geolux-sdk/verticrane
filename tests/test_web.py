@@ -15,6 +15,14 @@ from web import create_app
 
 
 class WebTests(unittest.TestCase):
+    def test_sensor_failure_notice(self):
+        self.rec.snapshot.return_value = Status(
+            state='recording', sensor_ok=False, sensor_issue='측정값 읽기 실패')
+        response = self.client.get('/?auto=1')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('측정값 읽기 실패', response.get_data(as_text=True))
+        self.assertIn('재연결을 기다리고 있습니다.', response.get_data(as_text=True))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='verticrane_web_test_')
         self.addCleanup(self.tmp.cleanup)

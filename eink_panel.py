@@ -51,6 +51,7 @@ SCREEN_RECORDING: str = "record"  # recording has begun; no reading to show yet
 SCREEN_MEASURE: str = "measure"   # left alone: what it reads
 SCREEN_BRAND: str = "brand"       # operator is connected: nothing to decide here
 SCREEN_ERROR: str = "error"
+SCREEN_SENSOR: str = "sensor"
 
 # The boot frame is the brand frame inverted, and that is the whole point. The
 # panel keeps its image without power, so whatever was on it before the power
@@ -251,6 +252,8 @@ def pick_screen(status: dict[str, Any]) -> str:
         return SCREEN_ERROR
     if status.get("booting"):
         return SCREEN_BOOT
+    if status.get("sensor_issue") and status.get("state") != "maintenance":
+        return SCREEN_SENSOR
     state: Any = status.get("state")
     if state == "maintenance":
         return SCREEN_BRAND
@@ -270,6 +273,8 @@ def render(status: dict[str, Any], contact_face: str = "bottom",
     screen: str = pick_screen(status)
     if screen == SCREEN_ERROR:
         _body_error(d, status)
+    elif screen == SCREEN_SENSOR:
+        _body_sensor(d, status)
     elif screen in (SCREEN_BRAND, SCREEN_BOOT):
         _body_brand(d)
     elif screen == SCREEN_RECORDING:
@@ -312,6 +317,15 @@ def _body_install(d: ImageDraw.ImageDraw, contact_face: str) -> None:
     rule, which read as a mistake next to every other screen.
     """
     draw_orientation(d, 27, TITLE_H + 4, contact_face, scale=1.20)
+
+
+def _body_sensor(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
+    for ko, en, y in [
+        (status.get("sensor_issue") or "측정값 읽기 실패", "SENSOR UNAVAILABLE", 65),
+        ("재연결 대기 중", "WAITING TO RECONNECT", 110),
+    ]:
+        text, korean = _label(ko, en)
+        _centre(d, y, text, _fit(d, text, WIDTH - 12, 20, korean=korean), 0)
 
 
 def _body_error(d: ImageDraw.ImageDraw, status: dict[str, Any]) -> None:
@@ -526,6 +540,7 @@ class PanelThread:
             "position": snap.position,
             "state": snap.state,
             "error_reason": getattr(snap, "error_reason", None),
+            "sensor_issue": getattr(snap, "sensor_issue", None),
             "tilt_pct": snap.tilt,
             "roll": snap.roll,
             "pitch": snap.pitch,

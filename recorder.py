@@ -300,6 +300,7 @@ class Status:
     pitch: Optional[float] = None
     temp_c: Optional[float] = None
     sensor_ok: bool = False
+    sensor_issue: Optional[str] = None
     stability: dict[str, Any] = field(default_factory=dict)
     free_mb: float = 0.0
     error: Optional[str] = None
@@ -398,7 +399,6 @@ class Recorder:
             self.status.position = af.POSITION_NAMES.get(self.position, "UNSET")
             self.status.device_serial = self.sensor.serial
             self.status.config_warnings = list(self.sensor.config_warnings)
-            self.status.sensor_ok = self.sensor.device is not None
             self.status.free_mb = _free_mb(self.data_dir)
             if self._record_start_mono:
                 self.status.elapsed_s = time.monotonic() - self._record_start_mono
@@ -566,7 +566,8 @@ class Recorder:
             time.sleep(0.2)
             return
 
-        self._poll_once(record=(self.state == RECORDING))
+        if not self._poll_once(record=(self.state == RECORDING)):
+            return
 
         # Judging costs a few hundred trig calls, so do it once per block rather
         # than once per sample. A 5 s window does not need a 25 Hz opinion.
@@ -599,7 +600,22 @@ class Recorder:
                             time.monotonic() - self._unstable_since)
             self._unstable_since = 0.0
 
-    def _poll_once(self, record: bool) -> None:
+    def _sensor_read_failed(self, reason: str) -> None:
+        changed = self.status.sensor_issue != reason
+        if changed:
+            logger.warning("Sensor data unavailable: {}", reason)
+        self.status.sensor_issue = reason
+        self.status.sensor_ok = False
+        self.status.tilt = self.status.roll = self.status.pitch = None
+        self.status.temp_c = None
+        self.monitor.reset()
+        self.status.stability = self.monitor.evaluate().as_dict()
+        self._since_judged = 0
+        self._block_flags |= af.FLAG_READ_FAILED
+        if changed and self.panel is not None:
+            self.panel.refresh_now()
+
+    def _poll_once(self, record: bool) -> bool:
         started: float = time.monotonic()
         # Here rather than in _tick: the boot holds spin on _poll_once and skip
         # _tick entirely, and that is precisely when the address first lands.
@@ -608,13 +624,14 @@ class Recorder:
                 self.cfg.get("ip_check_interval_seconds", 10))
             self._note_address()
         if not self.sensor.connect():
+            self._sensor_read_failed("센서 연결 끊김")
             time.sleep(0.2)
-            return
+            return False
 
         data: Optional[dict[str, float]] = self.sensor.read_angles()
         if data is None:
-            self._block_flags |= af.FLAG_READ_FAILED
-            return
+            self._sensor_read_failed("측정값 읽기 실패")
+            return False
 
         if self.sensor.reconnected:
             self._block_flags |= af.FLAG_RECONNECTED
@@ -622,8 +639,8 @@ class Recorder:
 
         roll, pitch, yaw = data.get("AngX"), data.get("AngY"), data.get("AngZ")
         if roll is None or pitch is None or yaw is None:
-            self._block_flags |= af.FLAG_READ_FAILED
-            return
+            self._sensor_read_failed("측정값 읽기 실패")
+            return False
 
         # Everything one poll returns gets kept: the 15 registers arrive in a
         # single transaction, so dropping any of it saves no time, only data.
@@ -651,11 +668,20 @@ class Recorder:
         if record:
             self._append_sample(started, sample)
 
+        recovered = self.status.sensor_issue is not None
+        self.status.sensor_issue = None
+        self.status.sensor_ok = True
+        if recovered:
+            logger.info("Sensor measurements resumed")
+            if self.panel is not None:
+                self.panel.refresh_now()
+
         # Pace to a steady rate; the sensor bandwidth is 10 Hz so 25 Hz keeps a
         # guard band above Nyquist.
         remaining: float = SAMPLE_PERIOD_S - (time.monotonic() - started)
         if remaining > 0:
             time.sleep(remaining)
+        return True
 
     # -- block assembly ---------------------------------------------------
 

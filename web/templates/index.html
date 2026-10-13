@@ -38,6 +38,12 @@
     </div>
   {% endif %}
 
+  {% if status.sensor_issue %}
+    <div class="notice bad" style="margin-top:12px">
+      {{ status.sensor_issue }} — 재연결을 기다리고 있습니다.
+    </div>
+  {% endif %}
+
   {% if status.position == "UNSET" %}
     <div class="notice bad" style="margin-top:12px">
       설치 위치가 설정되지 않았습니다. 기록 파일 이름이 <code>UNSET_</code>로 시작해
