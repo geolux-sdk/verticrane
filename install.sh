@@ -17,11 +17,29 @@
 # Both are decisions, not chores.
 set -uo pipefail
 
+DRY=0
+usage() {
+    echo "사용법: ./install.sh [--dry-run | --help]"
+    echo "  --dry-run  변경할 작업만 표시하며 실제로 적용하지 않습니다."
+}
+if [ "$#" -gt 1 ]; then
+    echo "오류: 옵션은 하나만 지정하세요." >&2
+    usage >&2
+    exit 2
+fi
+case "${1:-}" in
+    "") ;;
+    --dry-run) DRY=1 ;;
+    --help|-h) usage; exit 0 ;;
+    *)
+        echo "오류: 지원하지 않는 옵션입니다: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT}"
-
-DRY=0
-[ "${1:-}" = "--dry-run" ] && DRY=1
 
 APT_PACKAGES=(python3-venv python3-full python3-spidev python3-gpiozero python3-lgpio fonts-nanum bluez python3-dbus python3-gi)
 BOOT_CONFIG=/boot/firmware/config.txt
@@ -270,7 +288,7 @@ echo
 if [ "${DRY}" -eq 1 ]; then
     echo "   (dry-run — 아무것도 바꾸지 않았습니다)"
 else
-    echo "   점검:  ./test.sh --no-hardware"
+    echo "   점검:  ./test.sh"
     echo "   상태:  systemctl status verticrane-recorder pi-bt-wifi-setup"
 fi
 echo

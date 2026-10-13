@@ -219,7 +219,7 @@ e-paper에 표시된 주소로 `http://<장비IP>:8080`에 접속합니다. **�
 ```bash
 git clone https://github.com/geolux-sdk/verticrane.git ~/verticrane
 cd ~/verticrane && chmod +x *.sh dev/*.sh
-./install.sh              # 진단 후 필요한 것만 적용. --dry 로 미리 보기
+./install.sh              # 진단 후 필요한 것만 적용. --dry-run으로 미리 보기
 ```
 
 `install.sh`가 하는 일: UART/SPI 활성화, `dtoverlay=miniuart-bt` 전환, 그룹 가입
@@ -726,6 +726,9 @@ PIN 인증용 저장 항목은 이 표에서 제외했습니다. 파일을 직�
 | `analyze_tilt.py` | CSV 분석 (통계·FFT) |
 | `log_tilt.py` | CSV 직접 기록 (구형) |
 | `install_requirements.bat` | Windows 개발 환경 |
+
+대시보드와 CSV 측정 프로그램은 프로젝트 루트의 `data/` 폴더를 함께 사용합니다.
+어느 폴더에서 실행하더라도 저장·조회 경로는 같습니다.
 
 시험 코드는 `tests/`에 모았습니다. `tests/hardware/`는 센서·패널·GPIO 직접 시험,
 `tests/tools/fake_card.py`는 합성 기록으로 웹 화면을 확인하는 도구,

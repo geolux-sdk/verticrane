@@ -26,7 +26,7 @@ from port_config import add_port_argument, resolve_port
 
 
 # All measurements (CSV + matching analysis .txt) are stored here.
-OUTPUT_DIR = "data"
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 
 # Resolved from --port / VERTICRANE_PORT / auto-detect in main().

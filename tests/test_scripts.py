@@ -19,6 +19,23 @@ def shell_path(path):
 
 @unittest.skipUnless(BASH, 'Bash is required for shell regression tests')
 class ScriptTests(unittest.TestCase):
+    def test_install_rejects_invalid_arguments_before_provisioning(self):
+        for args in (['--dry'], ['--unknown'], ['--dry-run', '--unknown'], ['--help', 'extra']):
+            with self.subTest(args=args):
+                result = subprocess.run([BASH, str(ROOT / 'install.sh'), *args],
+                                        capture_output=True, text=True, encoding='utf-8')
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('사용법:', result.stderr)
+                self.assertEqual(result.stdout, '')
+
+    def test_install_help_does_not_provision(self):
+        for flag in ('--help', '-h'):
+            result = subprocess.run([BASH, str(ROOT / 'install.sh'), flag],
+                                    capture_output=True, text=True, encoding='utf-8')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--dry-run', result.stdout)
+            self.assertNotIn('==', result.stdout)
+
     def test_shell_syntax(self):
         for name in ('dev/devmode.sh', 'dev/run_dashboard.sh', 'test.sh', 'install.sh',
                      'install_requirements.sh', 'update.sh'):

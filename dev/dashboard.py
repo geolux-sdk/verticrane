@@ -33,7 +33,7 @@ import analyze_tilt
 import app_config  # importing app_config also applies the central loguru LOG_LEVEL
 import read_status
 
-DATA_DIR: str = "data"
+DATA_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 # Judgment criteria are editable by the admin on the hidden /setup page.
 _cfg: dict[str, Any] = app_config.load()
